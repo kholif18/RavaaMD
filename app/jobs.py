@@ -41,6 +41,9 @@ FAKE = os.environ.get("RAVAAMD_FAKE") == "1"  # dipakai tests/ (tanpa jaringan)
 RE_PROG = re.compile(r"(\d+(?:\.\d+)?)% of")
 LOG_MAXLEN = 500  # baris nyata disimpan per job (deque)
 
+FORMAT_VALID = {"mp3", "mp4"}
+FORMAT_DEFAULT = "mp3"
+
 
 def parse_progress(line: str):
     """Angka persen dari baris progres yt-dlp; None bila baris lainnya."""
@@ -52,16 +55,17 @@ class Job:
     _seq = 0
     _seq_lock = threading.Lock()
 
-    def __init__(self, query: str):
+    def __init__(self, query: str, fmt: str = FORMAT_DEFAULT):
         with Job._seq_lock:
             Job._seq += 1
             self.id = Job._seq
         self.query = query.strip()
+        self.format = fmt if fmt in FORMAT_VALID else FORMAT_DEFAULT
         self.status = "pending"  # pending | running | done | error | canceled
         self.percent = None
         self.lines: deque[str] = deque(maxlen=LOG_MAXLEN)
         self.exitcode = None
-        self.file = None          # path mp3 hasil convert (di folder kerja job)
+        self.file = None          # path hasil convert (di folder kerja job)
         self.dir = None           # folder kerja per-job (dibuat di _run)
         self.video_id = None      # id video YouTube (untuk fallback cover)
         self.started = None
@@ -71,6 +75,7 @@ class Job:
         return {
             "id": self.id,
             "query": self.query,
+            "format": self.format,
             "status": self.status,
             "percent": self.percent,
             "exitcode": self.exitcode,
@@ -141,8 +146,10 @@ class JobManager:
             shutil.rmtree(d, ignore_errors=True)
 
     # ---- API dipanggil handler HTTP ----
-    def add(self, query: str) -> Job:
-        job = Job(query)
+    def add(self, query: str, fmt: str = FORMAT_DEFAULT) -> Job:
+        if fmt not in FORMAT_VALID:
+            fmt = FORMAT_DEFAULT
+        job = Job(query, fmt=fmt)
         with self.lock:
             self.queue.append(job)
         self.on_state_change()
@@ -213,15 +220,17 @@ class JobManager:
             if i > 0:
                 job.lines.append("coba ulang via pencarian YouTube biasa…")
             sebelum = set(os.listdir(job.dir))
-            code = self._jalankan_ytdlp(job, url)
+            code = self._jalankan_ytdlp(job, url, job.format)
             if code == 0:
                 break
         job.exitcode = code
         if code == 0:
-            # mp3 hasil job = yang tidak ada sebelum yt-dlp jalan (folder kini
-            # per-job, jadi kandidatnya pasti milik job ini)
+            # hasil job = yang tidak ada sebelum yt-dlp jalan (folder kini
+            # per-job, jadi kandidatnya pasti milik job ini). Deteksi menurut
+            # ekstensi format yang diminta (.mp3 atau .mp4).
+            ekst = ".mp4" if job.format == "mp4" else ".mp3"
             baru = [f for f in os.listdir(job.dir)
-                    if f.lower().endswith(".mp3") and f not in sebelum]
+                    if f.lower().endswith(ekst) and f not in sebelum]
             if baru:
                 newest = max(baru, key=lambda f: os.path.getmtime(os.path.join(job.dir, f)))
                 job.file = os.path.join(job.dir, newest)
@@ -232,17 +241,37 @@ class JobManager:
                 job.lines.append("yt-dlp sukses tapi mp3 tidak ditemukan")
         self._finish(job, error=(code != 0 or not job.file))
 
-    def _jalankan_ytdlp(self, job: Job, url: str) -> int:
-        """Jalankan yt-dlp untuk SATU url; kembalikan exit code (bukan lempar)."""
-        cmd = [
-            YT_DLP, "-x", "--audio-format", "mp3", "--audio-quality", "0",
-            "--embed-metadata", "--embed-thumbnail", "--no-playlist",
-            "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
-            "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
-            "-P", job.dir,
-            "-o", "%(title)s.%(ext)s",
-            url,
-        ]
+    def _jalankan_ytdlp(self, job: Job, url: str, fmt: str) -> int:
+        """Jalankan yt-dlp untuk SATU url; kembalikan exit code (bukan lempar).
+
+        Resep MP3 (terkunci, tidak diubah):
+          -x --audio-format mp3 --audio-quality 0 --embed-metadata
+          --embed-thumbnail --no-playlist
+        Resep MP4 (baru, tanpa -x):
+          -f best --merge-output-format mp4 --embed-metadata
+          --embed-thumbnail --no-playlist
+        """
+        if fmt == "mp4":
+            cmd = [
+                YT_DLP, "-f", "best", "--merge-output-format", "mp4",
+                "--embed-metadata", "--embed-thumbnail", "--no-playlist",
+                "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
+                "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
+                "-P", job.dir,
+                "-o", "%(title)s.%(ext)s",
+                url,
+            ]
+        else:
+            # mp3 — resep terkunci, jangan diubah
+            cmd = [
+                YT_DLP, "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                "--embed-metadata", "--embed-thumbnail", "--no-playlist",
+                "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
+                "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
+                "-P", job.dir,
+                "-o", "%(title)s.%(ext)s",
+                url,
+            ]
         job.lines.append("$ " + " ".join(cmd))
         try:
             proc = subprocess.Popen(
@@ -277,15 +306,21 @@ class JobManager:
 
         yt-dlp menulis judul mentah 'Artis - Judul (Official ...)' ke tag —
         Amberol menampilkannya jadi satu gumpal. Remux ffmpeg (-c copy,
-        sampul APIC ikut, bitrate tidak berubah) hanya mengganti 2 tag ini;
+        sampul ikut, bitrate tidak berubah) hanya mengganti 2 tag ini;
         tag lain tidak ikut hilang karena tidak disebut ulang.
+
+        Cabang per format:
+          * mp3:  -map 0:a:0 -map 0:v:0? -f mp3  (ID3, jaring cover fallback)
+          * mp4:  -map 0:v:0 -map 0:a:0? -f mp4  (container mp4, skip cover
+                  fallback: ada_sampul deteksi stream video utama, bukan cover)
         """
         f = job.file
         if not f or not os.path.isfile(f):
             return
         sekarang_title, sekarang_artist = baca_tag(f)
         raw = os.path.basename(f)
-        if raw.lower().endswith(".mp3"):
+        ekst = os.path.splitext(raw)[1].lower()
+        if ekst == ".mp3":
             raw = raw[:-4]
         if hint and hint.get("judul"):
             judul = bersih_judul(hint["judul"],
@@ -300,16 +335,27 @@ class JobManager:
         if judul == sekarang_title and artis == sekarang_artist:
             job.lines.append(f"tag OK: judul={judul!r} artis={artis!r}")
         else:
-            tmp = f + ".retag.mp3"
-            cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-i", f, "-map", "0:a:0", "-map", "0:v:0?", "-c", "copy",
-                "-metadata", f"title={judul}",
-                "-metadata", f"artist={artis}",
-                "-metadata:s:v", "title=Album cover",
-                "-metadata:s:v", "comment=Cover (front)",
-                "-id3v2_version", "3", "-f", "mp3", tmp,
-            ]
+            if ekst == ".mp4":
+                tmp = f + ".retag.mp4"
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", f, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+                    "-movflags", "+faststart",
+                    "-metadata", f"title={judul}",
+                    "-metadata", f"artist={artis}",
+                    "-f", "mp4", tmp,
+                ]
+            else:
+                tmp = f + ".retag.mp3"
+                cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", f, "-map", "0:a:0", "-map", "0:v:0?", "-c", "copy",
+                    "-metadata", f"title={judul}",
+                    "-metadata", f"artist={artis}",
+                    "-metadata:s:v", "title=Album cover",
+                    "-metadata:s:v", "comment=Cover (front)",
+                    "-id3v2_version", "3", "-f", "mp3", tmp,
+                ]
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if p.returncode != 0 or not os.path.isfile(tmp):
@@ -324,8 +370,10 @@ class JobManager:
                 return
             t2, a2 = baca_tag(f)
             job.lines.append(f"tag OK: judul={t2!r} artis={a2!r}")
-        # jaring pengaman: cover hilang → tarik thumbnail resmi lalu sematkan
-        if not ada_sampul(f) and job.video_id:
+        # jaring pengaman cover (HANYA mp3): untuk mp4, ada_sampul() akan
+        # selalu positif karena stream video utama ikut terdeteksi — jangan
+        # pakai sebagai penanda cover.
+        if job.format == "mp3" and not ada_sampul(f) and job.video_id:
             job.lines.append(f"cover tidak ada → tarik thumbnail {job.video_id}…")
             jpg = unduh_sampul(job.video_id)
             if jpg:
@@ -369,14 +417,24 @@ class JobManager:
                     pass
 
     def _run_fake(self, job: Job):
-        """Mode test: tanpa jaringan — meniru siklus progres lalu menulis file gagus."""
-        out = os.path.join(job.dir, f"uji-unduh-{job.id}.mp3")
+        """Mode test: tanpa jaringan — meniru siklus progres lalu menulis file gagus.
+
+        MP3 = ID3 palsu; MP4 = ftyp box palsu (container mp4 valid sekeliling).
+        """
+        ekst = ".mp4" if job.format == "mp4" else ".mp3"
+        out = os.path.join(job.dir, f"uji-unduh-{job.id}{ekst}")
         for pct in (0.0, 40.0, 100.0):
             job.lines.append(f"[download]  {pct}% of    2.00MiB at  3.33MiB/s ETA 00:00")
             job.percent = pct
             time.sleep(0.15)
-        with open(out, "wb") as f:
-            f.write(b"ID3\x03\x00\x00\x00" + b"\x00" * 64)
+        if ekst == ".mp4":
+            # ftyp box minimal: ukuran + brand mp42 + kompatibel brands
+            with open(out, "wb") as f:
+                f.write(b"\x00\x00\x00\x20ftypmp42\x00\x00\x00\x00"
+                        b"mp42isom" + b"\x00" * 64)
+        else:
+            with open(out, "wb") as f:
+                f.write(b"ID3\x03\x00\x00\x00" + b"\x00" * 64)
         job.file = out
 
     def _finish(self, job: Job, error: bool = False):
