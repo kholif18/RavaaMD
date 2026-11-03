@@ -33,7 +33,7 @@ const LABEL = { pending: "queued", running: "running", done: "done", error: "err
 function liJob(job) {
   const pct = job.percent == null ? "" : `${Math.round(job.percent)}%`;
   const bawah = job.status === "pending" ? "waiting…"
-    : job.status === "done" && job.file ? esc(job.file)  // result → file name
+    : job.status === "done" && job.file ? esc(job.file)
     : [pct, waktu(job.started)].filter(Boolean).join(" · ");
   return `<li>
     <span class="item-utama">
@@ -46,21 +46,16 @@ function liJob(job) {
 
 let state = null;
 let tombolJalan = false;
-let formatTerpilih = "mp3";  // default MP3
-let kualitasTerpilih = "best";  // default best
+let formatTerpilih = "mp3";
+let kualitasTerpilih = "best";
+let querySedang = "";
 
-// Quality options per format
-const KUALITAS_OPSI = {
-  mp3: ["best", "320k", "256k", "192k", "128k"],
-  mp4: ["best", "1080p", "720p", "480p", "360p"],
-};
-
+/* ---- render ---- */
 function render() {
   if (!state) return;
   const cur = state.current, queue = state.queue || [], hist = state.history || [];
   const jalan = !!cur && cur.status === "running";
 
-  // status pill di topbar
   const pill = $("status-pill");
   pill.className = "pill-status " + (jalan ? "jalan" : "siap");
   pill.innerHTML = `<i></i>${jalan ? "downloading" : "idle"}`;
@@ -103,7 +98,7 @@ function toast(pesan, tipe = "info") {
   window.setTimeout(() => el.remove(), 3600);
 }
 
-/* ---- custom confirmation dialog (replaces native confirm()) ---- */
+/* ---- confirmation dialog ---- */
 function konfirmasi({ judul, pesan, ok = "Continue" }) {
   return new Promise((selesai) => {
     const m = $("modal");
@@ -140,36 +135,42 @@ function layarMati() {
     </div>`;
 }
 
-/* ---- populate quality dropdown based on selected format ---- */
-function muatKualitas() {
-  const select = $("kualitas");
-  const label = $("kualitas-label");
-  const ops = KUALITAS_OPSI[formatTerpilih] || ["best"];
-  select.innerHTML = ops.map(v => `<option value="${v}">${v === "best" ? "Best" : v}</option>`).join("");
-  // keep current selection if still valid, else reset to best
-  if (!ops.includes(kualitasTerpilih)) {
-    kualitasTerpilih = "best";
-  }
-  select.value = kualitasTerpilih;
-  label.textContent = formatTerpilih === "mp4" ? "Resolution" : "Bitrate";
+/* ---- tab switching MP3/MP4 ---- */
+function pilihTab(fmt) {
+  formatTerpilih = fmt;
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("aktif"));
+  $(`.tab-btn[data-fmt="${fmt}"]`).classList.add("aktif");
+  document.querySelectorAll(".qual-panel").forEach(p => p.classList.remove("aktif"));
+  $(`#qual-${fmt}`).classList.add("aktif");
 }
 
+/* ---- event listeners ---- */
 window.addEventListener("DOMContentLoaded", () => {
-  $("form-unduh").addEventListener("submit", (e) => { e.preventDefault(); unduh(); });
-  // toggle format MP3/MP4
-  $("form-unduh").addEventListener("click", (e) => {
-    if (e.target.matches(".fmt-btn")) {
-      document.querySelectorAll(".fmt-btn").forEach(b => b.classList.remove("aktif"));
-      e.target.classList.add("aktif");
-      formatTerpilih = e.target.dataset.fmt;
-      kualitasTerpilih = "best";
-      muatKualitas();
-    }
+  // Start button: validate input, show format options
+  $("btn-start").addEventListener("click", () => {
+    const q = $("q").value.trim();
+    if (!q) { $("q").focus(); return; }
+    querySedang = q;
+    $("format-options").hidden = false;
+    $("info-box").hidden = true;
+    pilihTab("mp3");
   });
-  // remember quality selection
-  $("kualitas").addEventListener("change", (e) => {
-    kualitasTerpilih = e.target.value;
+
+  // Tab MP3/MP4
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.addEventListener("click", () => pilihTab(b.dataset.fmt));
   });
+
+  // Download per quality
+  document.querySelectorAll(".qual-dl").forEach(b => {
+    b.addEventListener("click", () => unduh(b.dataset.fmt, b.dataset.qual));
+  });
+
+  // Close info box
+  $("btn-info-close").addEventListener("click", () => {
+    $("info-box").hidden = true;
+  });
+
   $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
   $("btn-exit").addEventListener("click", async () => {
     const ok = await konfirmasi({
@@ -181,6 +182,7 @@ window.addEventListener("DOMContentLoaded", () => {
     await api("/api/shutdown", {});
     layarMati();
   });
+
   poll();
   window.setInterval(poll, 800);
 });
@@ -193,11 +195,7 @@ async function poll() {
   tarikSelesai();
 }
 
-/* ---- pull converted result to device (done → direct download) ----
-   Only the tab that SENT the download request pulls its result:
-   sessionStorage survives reload but disappears when tab is closed —
-   no surprise downloads from old sessions. Server deletes file only
-   after full transfer, so failed attempts can be retried (max 3). */
+/* ---- fetch result ---- */
 const K_MINTA = "ytmp3-minta", K_SUDAH = "ytmp3-sudah";
 function muatSet(k) {
   try { return new Set(JSON.parse(sessionStorage.getItem(k) || "[]")); } catch { return new Set(); }
@@ -205,10 +203,10 @@ function muatSet(k) {
 function simpanSet(k, s) {
   try { sessionStorage.setItem(k, JSON.stringify([...s].slice(-30))); } catch { /* private mode: OK */ }
 }
-const minta = muatSet(K_MINTA);   // job ids requested by this tab
-const sudah = muatSet(K_SUDAH);   // ids already fetched / given up
-const sedang = new Set();         // ids being fetched (prevent double across polls)
-const coba = {};                  // id → failed attempts
+const minta = muatSet(K_MINTA);
+const sudah = muatSet(K_SUDAH);
+const sedang = new Set();
+const coba = {};
 
 async function tarikHasil(job) {
   const id = job.id;
@@ -232,12 +230,11 @@ async function tarikHasil(job) {
     toast(`"${job.file}" saved to Downloads folder`, "sukses");
   } catch (e) {
     coba[id] = (coba[id] || 0) + 1;
-    if (coba[id] >= 3) {          // give up — stop spamming retries
+    if (coba[id] >= 3) {
       sudah.add(id);
       simpanSet(K_SUDAH, sudah);
       toast(`Failed to fetch "${job.file}": ${e.message}`, "error");
     }
-    // < 3 attempts: id not marked → next poll retries
   } finally {
     sedang.delete(id);
   }
@@ -248,22 +245,28 @@ function tarikSelesai() {
   for (const job of state.history || []) {
     if (job.status !== "done" || !job.file) continue;
     if (!minta.has(job.id) || sudah.has(job.id) || sedang.has(job.id)) continue;
-    tarikHasil(job);  // no await — poll keeps running every 800 ms
+    tarikHasil(job);
   }
 }
 
-async function unduh() {
+/* ---- download: show info box then call API ---- */
+async function unduh(fmt, qual) {
   if (tombolJalan) return;
-  const q = $("q").value.trim();
+  const q = querySedang.trim();
   if (!q) { $("q").focus(); return; }
   tombolJalan = true;
-  render();
-  const r = await api("/api/download", { query: q, format: formatTerpilih, quality: kualitasTerpilih });
+
+  // show info box
+  $("info-query").textContent = q;
+  $("info-box").hidden = false;
+
+  const r = await api("/api/download", { query: q, format: fmt, quality: qual });
   tombolJalan = false;
-  if (r.error) toast(r.error, "error");
-  else {
+  if (r.error) {
+    toast(r.error, "error");
+  } else {
     $("q").value = "";
-    minta.add(r.job.id);          // this tab is entitled to fetch this job's result
+    minta.add(r.job.id);
     simpanSet(K_MINTA, minta);
     toast("Added to queue", "sukses");
   }

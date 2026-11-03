@@ -41,36 +41,60 @@
         </span>
         <div class="panel-judul">
           <h2 id="judul-unduh">Download</h2>
-          <p class="panel-sub">Enter song title or YouTube URL — pick MP3 or MP4, result is sent to your device</p>
+          <p class="panel-sub">Paste YouTube URL or song title, click Start, then pick format & quality</p>
         </div>
       </div>
 
+      <!-- input + start -->
       <form id="form-unduh" class="baris-unduh" autocomplete="off">
         <span class="input-wrap">
           <svg class="input-ikon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
           <input id="q" type="text" spellcheck="false"
-                 placeholder="e.g. Keane Somewhere Only We Know">
+                 placeholder="Paste YouTube URL or song title…">
         </span>
-        <div class="format-pilih" aria-label="Download format">
-          <button type="button" class="fmt-btn aktif" data-fmt="mp3">MP3</button>
-          <button type="button" class="fmt-btn" data-fmt="mp4">MP4</button>
-        </div>
-        <!-- kualitas: muncul berdasarkan format yang dipilih -->
-        <div class="kualitas-pilih" aria-label="Quality">
-          <label class="kualitas-label" id="kualitas-label">Quality</label>
-          <select id="kualitas" class="kualitas-select">
-            <option value="best">Best</option>
-          </select>
-        </div>
-        <button id="btn-download" class="btn utama" type="submit">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
-          Download
+        <button id="btn-start" class="btn utama" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 12-14 12V3z"/></svg>
+          Start
         </button>
       </form>
-      <div class="chips" aria-hidden="true">
-        <span class="chip"><i class="dot dot-brand"></i>YouTube Music first</span>
-        <span class="chip"><i class="dot dot-mute"></i>YouTube fallback</span>
-        <span class="chip"><i class="dot dot-green"></i>tag + cover → to device</span>
+
+      <!-- format options (muncul setelah Start) -->
+      <div id="format-options" class="format-options" hidden>
+        <div class="format-tabs">
+          <button class="tab-btn aktif" data-fmt="mp3">MP3</button>
+          <button class="tab-btn" data-fmt="mp4">MP4</button>
+        </div>
+
+        <!-- MP3 qualities -->
+        <div id="qual-mp3" class="qual-panel aktif">
+          <div class="qual-label">Bitrate</div>
+          <div class="qual-grid">
+            <div class="qual-item"><span class="qual-label2">Best</span><button class="qual-dl" data-fmt="mp3" data-qual="best">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">320 kbps</span><button class="qual-dl" data-fmt="mp3" data-qual="320k">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">256 kbps</span><button class="qual-dl" data-fmt="mp3" data-qual="256k">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">192 kbps</span><button class="qual-dl" data-fmt="mp3" data-qual="192k">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">128 kbps</span><button class="qual-dl" data-fmt="mp3" data-qual="128k">Download</button></div>
+          </div>
+        </div>
+
+        <!-- MP4 qualities -->
+        <div id="qual-mp4" class="qual-panel">
+          <div class="qual-label">Resolution</div>
+          <div class="qual-grid">
+            <div class="qual-item"><span class="qual-label2">Best</span><button class="qual-dl" data-fmt="mp4" data-qual="best">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">1080p</span><button class="qual-dl" data-fmt="mp4" data-qual="1080p">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">720p</span><button class="qual-dl" data-fmt="mp4" data-qual="720p">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">480p</span><button class="qual-dl" data-fmt="mp4" data-qual="480p">Download</button></div>
+            <div class="qual-item"><span class="qual-label2">360p</span><button class="qual-dl" data-fmt="mp4" data-qual="360p">Download</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- info URL yang akan diunduh -->
+      <div id="info-box" class="info-box" hidden>
+        <span class="info-ikon" aria-hidden="true">▶</span>
+        <span id="info-query" class="info-teks"></span>
+        <button id="btn-info-close" class="btn hantu kecil" type="button">×</button>
       </div>
 
       <!-- job berjalan -->
@@ -99,7 +123,7 @@
     </section>
   </main>
 
-  <!-- dialog konfirmasi (pengganti confirm() bawaan) -->
+  <!-- dialog konfirmasi -->
   <div id="modal" class="modal" hidden>
     <div class="modal-kotak" role="alertdialog" aria-modal="true" aria-labelledby="modal-judul">
       <span id="modal-ikon" class="modal-ikon" aria-hidden="true">!</span>

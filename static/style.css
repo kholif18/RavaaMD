@@ -174,16 +174,41 @@ input[type="text"]:focus {
   box-shadow: 0 4px 12px rgba(99, 102, 241, .35);
 }
 
-.kualitas-pilih { display: inline-flex; align-items: center; gap: 8px; margin-left: 10px; }
-.kualitas-label { font-size: 12px; font-weight: 600; color: var(--redup-2); white-space: nowrap; }
-.kualitas-select {
-  height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--surface-3); color: var(--teks); font-size: 13px; font-weight: 600;
-  cursor: pointer; white-space: nowrap;
+.format-options { margin-top: 16px; }
+.format-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tab-btn {
+  padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface-3); color: var(--redup); font-weight: 650; cursor: pointer;
 }
-.kualitas-select:hover { border-color: var(--line-hi); }
-.kualitas-select:focus { outline: none; border-color: rgba(99, 102, 241, .55);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, .16); }
+.tab-btn.aktif {
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  border-color: transparent; color: #fff;
+}
+.tab-btn:hover { border-color: var(--line-hi); }
+.qual-panel { display: none; }
+.qual-panel.aktif { display: block; }
+.qual-label { font-size: 12px; font-weight: 700; color: var(--redup);
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: .08em; }
+.qual-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px; }
+.qual-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+.qual-label2 { flex: 1; font-size: 13px; color: var(--teks); }
+.qual-dl {
+  padding: 6px 14px; border-radius: 9px; border: none;
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  color: #fff; font-weight: 700; font-size: 12px; cursor: pointer;
+}
+.qual-dl:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.qual-dl:active { transform: translateY(0); }
+
+.info-box { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  padding: 10px 14px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 10px; }
+.info-ikon { font-size: 14px; }
+.info-teks { flex: 1; font-size: 13px; color: var(--teks); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.btn.kecil { padding: 6px 11px; font-size: 12px; border-radius: 9px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
 .chip {
