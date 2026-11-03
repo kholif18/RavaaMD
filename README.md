@@ -1,18 +1,22 @@
 # RavaaMD
 
-Aplikasi pribadi untuk mengunduh lagu dari YouTube sebagai MP3
-**lengkap dengan tag judul-artis + sampul tertanam** — jadi Amberol (atau
-player lain) langsung menampilkan lagu dengan benar, tanpa pakai CLI dan
+Aplikasi pribadi untuk mengunduh lagu/video dari YouTube sebagai **MP3 atau
+MP4**, **lengkap dengan tag judul-artis + sampul tertanam** — jadi Amberol
+(atau player lain) langsung menampilkan lagu dengan benar, tanpa pakai CLI dan
 tanpa situs downloader penuh iklan.
 
 *RavaaMD = **R**avaa **M**edia **D**ownloader.*
 
 
-Satu-satunya sihir di dalamnya: `yt-dlp` dijalankan dengan
+MP3 (default) diunduh dengan resep terkunci:
 
 ```
 -x --audio-format mp3 --audio-quality 0 --embed-metadata --embed-thumbnail --no-playlist
 ```
+
+MP4 diunduh tanpa ekstraksi audio (`-f best --merge-output-format mp4`)
+agar video + audio tetap utuh dalam container MP4, juga dengan metadata dan
+thumbnail tertanam.
 
 ## Cara pakai
 
@@ -33,14 +37,16 @@ dengar di LAN (akses dari laptop/HP lain via IP, tanpa auth):
 Di dalam GUI:
 
 1. Ketik nama lagu (contoh: `Keane Somewhere Only We Know`) **atau** tempel
-   URL YouTube, klik **Unduh** (atau Enter). Pencarian otomatis mencoba
-   **YouTube Music dulu** (trek resmi katalog) — kalau tidak ketemu, jatuh
-   ke pencarian YouTube biasa.
+   URL YouTube. Pilih **MP3** (default) atau **MP4** dengan tombol toggle di
+   samping kotak masukan, lalu klik **Unduh** (atau Enter). Pencarian otomatis
+   mencoba **YouTube Music dulu** (trek resmi katalog) — kalau tidak ketemu,
+   jatuh ke pencarian YouTube biasa.
 2. Bar progres + log menunjukkan jalannya unduhan; beberapa unduhan
-   diacak-antrian satu per satu.
+   diantri satu per satu (MP3 dan MP4 dalam antrian yang sama).
 3. **Tag dipisah otomatis** setelah unduhan: judul masuk kolom *title*,
    artis masuk kolom *artist* (mis. `Sugar` / `Maroon 5`) — jadi Amberol
    menampilkan lagu dengan rapi, bukan satu gumpal "Artis - Judul (...)".
+   Berlaku baik untuk MP3 maupun MP4.
 4. Daftar **Pustaka** di kanan adalah isi folder musik yang aktif — tombol
    **Buka folder** membukanya di pengelola berkas (Nautilus).
 5. Ganti folder tujuan lewat kotak **folder** lalu **Simpan** (disimpan

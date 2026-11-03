@@ -27,6 +27,9 @@ AKHIRAN_STATIS = {
 }
 MAKS_BODY = 10_000
 
+FORMAT_VALID = {"mp3", "mp4"}
+FORMAT_DEFAULT = "mp3"
+
 
 def _akhiran(path: str) -> str:
     return os.path.splitext(path)[1].lower()
@@ -112,10 +115,13 @@ def build_handler(ctx: Ctx) -> type:
                     # filename ASCII aman + filename* UTF-8 (nama berspasi/emoji)
                     ascii_nama = nama.encode("ascii", "replace").decode().replace('"', "")
                     self.send_response(200)
-                    self.send_header(
-                        "Content-Type",
-                        "audio/mpeg" if nama.lower().endswith(".mp3")
-                        else "application/octet-stream")
+                    if nama.lower().endswith(".mp4"):
+                        content_type = "video/mp4"
+                    elif nama.lower().endswith(".mp3"):
+                        content_type = "audio/mpeg"
+                    else:
+                        content_type = "application/octet-stream"
+                    self.send_header("Content-Type", content_type)
                     self.send_header(
                         "Content-Disposition",
                         f"attachment; filename=\"{ascii_nama}\"; "
@@ -149,7 +155,10 @@ def build_handler(ctx: Ctx) -> type:
                     return self._bad("query tidak boleh kosong")
                 if len(q) > 300:
                     return self._bad("kuerian terlalu panjang (maks 300)")
-                job = ctx.jobs.add(q)
+                fmt = str(data.get("format", FORMAT_DEFAULT)).strip()
+                if fmt not in FORMAT_VALID:
+                    return self._bad(f"format tidak valid (pilih {', '.join(sorted(FORMAT_VALID))})")
+                job = ctx.jobs.add(q, fmt=fmt)
                 return self._json(201, {"ok": True, "job": job.to_dict(tail=1)})
 
             if url == "/api/cancel":

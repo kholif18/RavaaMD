@@ -21,7 +21,9 @@ sys.path.insert(0, ROOT)
 from app.jobs import parse_progress  # noqa: E402
 
 # isi file palsu buatan mode FAKE (harus sama dengan app/jobs.py _run_fake)
-FAKE_BYTES = b"ID3\x03\x00\x00\x00" + b"\x00" * 64
+FAKE_BYTES_MP3 = b"ID3\x03\x00\x00\x00" + b"\x00" * 64
+# ftyp box minimal untuk mp4 palsu (container mp4 valid sekeliling)
+FAKE_BYTES_MP4 = b"\x00\x00\x00\x20ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 64
 
 
 def _bebas_port():
@@ -123,6 +125,23 @@ class TestApi(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", r)
 
+    def test_03b_format_tidak_valid_ditolak(self):
+        status, r = _post(self.port, "/api/download", {"query": "uji lagu", "format": "mkv"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", r)
+        # format default (mp3) masih diterima bila tidak disertakan (cek hanya response, tidak menambahkan job yang menunggu)
+        status, r = _post(self.port, "/api/download", {"query": "uji lagu"})
+        self.assertEqual(status, 201)
+        self.assertEqual(r["job"]["format"], "mp3")
+        # hapus job yang baru saja dibuat (fetch untuk membersihkan folder kerja)
+        jid = r["job"]["id"]
+        for _ in range(60):
+            time.sleep(0.2)
+            _, st = _get(self.port, "/api/state")
+            if st["current"] is None and st["history"]:
+                break
+        _get_bin(self.port, f"/api/fetch?id={jid}")
+
     def test_04_fetch_id_invalid_ditolak(self):
         # traversal lewat nama file mustahil — fetch hanya menerima id job int
         status, body, _ = _get_bin(self.port, "/api/fetch?id=../../etc/passwd")
@@ -131,34 +150,72 @@ class TestApi(unittest.TestCase):
         status, body, _ = _get_bin(self.port, "/api/fetch?id=999999")
         self.assertEqual(status, 404)
 
+    def _cari_job(self, jid):
+        """Cari job dengan id jid di current atau history."""
+        _, st = _get(self.port, "/api/state")
+        if st["current"] and st["current"]["id"] == jid:
+            return st["current"]
+        for j in st.get("history", []):
+            if j["id"] == jid:
+                return j
+        return None
+
     def test_05_siklus_job_fake_lalu_fetch(self):
         status, r = _post(self.port, "/api/download", {"query": "uji lagu"})
         self.assertEqual(status, 201)
         jid = r["job"]["id"]
+        self.assertEqual(r["job"]["format"], "mp3")
         # tunggu job selesai (fake ±0.5 s) + tepat 10 s
         terakhir = None
-        for _ in range(60):
-            time.sleep(0.2)
-            _, st = _get(self.port, "/api/state")
-            cur, hist = st["current"], st["history"]
-            if cur is None and hist:
-                terakhir = hist[0]
+        for _ in range(100):
+            terakhir = self._cari_job(jid)
+            if terakhir and terakhir["status"] in ("done", "error", "canceled"):
                 break
+            time.sleep(0.2)
         self.assertIsNotNone(terakhir, "job tidak kunjung selesai")
-        self.assertEqual(terakhir["id"], jid)
+        self.assertEqual(terakhir["query"], "uji lagu")
         self.assertEqual(terakhir["status"], "done")
         self.assertTrue(terakhir["file"], "job fake harus mencatat file hasil")
         self.assertNotIn("/", terakhir["file"], "file di state = nama dasar saja")
         # fetch: isi file persis hasil convert + header attachment
         status, body, hdr = _get_bin(self.port, f"/api/fetch?id={jid}")
         self.assertEqual(status, 200)
-        self.assertEqual(body, FAKE_BYTES, "isi yang diterima = isi asli file")
+        self.assertEqual(body, FAKE_BYTES_MP3, "isi yang diterima = isi asli file")
         self.assertIn("attachment", hdr.get("Content-Disposition", ""))
         # server tidak menyimpan: setelah terkirim, folder kerja job dibuang
         time.sleep(0.2)
         self.assertEqual(os.listdir(self.kerja), [],
                          "folder kerja harus kosong setelah fetch")
         # fetch ulang = 404 (sudah terkirim & dihapus)
+        status, _, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
+        self.assertEqual(status, 404)
+
+    def test_05b_siklus_job_fake_mp4_lalu_fetch(self):
+        status, r = _post(self.port, "/api/download", {"query": "uji video", "format": "mp4"})
+        self.assertEqual(status, 201)
+        self.assertEqual(r["job"]["format"], "mp4")
+        jid = r["job"]["id"]
+        terakhir = None
+        for _ in range(100):
+            terakhir = self._cari_job(jid)
+            if terakhir and terakhir["status"] in ("done", "error", "canceled"):
+                break
+            time.sleep(0.2)
+        self.assertIsNotNone(terakhir, "job mp4 tidak kunjung selesai")
+        self.assertEqual(terakhir["query"], "uji video")
+        self.assertEqual(terakhir["format"], "mp4")
+        self.assertEqual(terakhir["status"], "done")
+        self.assertTrue(terakhir["file"].endswith(".mp4"), "file harus berakhir .mp4")
+        self.assertNotIn("/", terakhir["file"], "file di state = nama dasar saja")
+        # fetch: isi = fake mp4 + content-type video/mp4
+        status, body, hdr = _get_bin(self.port, f"/api/fetch?id={jid}")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, FAKE_BYTES_MP4, "isi yang diterima = isi asli file mp4")
+        self.assertEqual(hdr.get("Content-Type", ""), "video/mp4")
+        self.assertIn("attachment", hdr.get("Content-Disposition", ""))
+        time.sleep(0.2)
+        self.assertEqual(os.listdir(self.kerja), [],
+                         "folder kerja harus kosong setelah fetch")
         status, _, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
         self.assertEqual(status, 404)
 

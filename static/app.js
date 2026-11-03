@@ -46,6 +46,7 @@ function liJob(job) {
 
 let state = null;
 let tombolJalan = false;
+let formatTerpilih = "mp3";  // default MP3
 
 function render() {
   if (!state) return;
@@ -134,6 +135,14 @@ function layarMati() {
 
 window.addEventListener("DOMContentLoaded", () => {
   $("form-unduh").addEventListener("submit", (e) => { e.preventDefault(); unduh(); });
+  // toggle format MP3/MP4
+  $("form-unduh").addEventListener("click", (e) => {
+    if (e.target.matches(".fmt-btn")) {
+      document.querySelectorAll(".fmt-btn").forEach(b => b.classList.remove("aktif"));
+      e.target.classList.add("aktif");
+      formatTerpilih = e.target.dataset.fmt;
+    }
+  });
   $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
   $("btn-exit").addEventListener("click", async () => {
     const ok = await konfirmasi({
@@ -222,7 +231,7 @@ async function unduh() {
   if (!q) { $("q").focus(); return; }
   tombolJalan = true;
   render();
-  const r = await api("/api/download", { query: q });
+  const r = await api("/api/download", { query: q, format: formatTerpilih });
   tombolJalan = false;
   if (r.error) toast(r.error, "galat");
   else {
