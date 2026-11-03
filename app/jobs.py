@@ -1,5 +1,11 @@
 """Antrian unduhan — eksekusi yt-dlp SATU job sekaligus (urutan memakai lock).
 
+Server = CONVERTER MURNI (keputusan user 2026-11-03): hasil convert tinggal di
+folder kerja per-job, dikirim ke perangkat peminat lewat `GET /api/fetch`,
+lalu DIHAPUS — tidak ada hasil yang disimpan di server (tak ada pembersihan
+manual). Folder kerja dibuang juga saat: start (sisa crash), job gagal/batal,
+dan job keluar dari history (overflow).
+
 Invarian yang dijaga (lihat AGENTS.md §5):
   * HANYA satu process yt-dlp jalan bersamaan; job berikutnya menunggu.
   * Selalu `-x --audio-format mp3 --audio-quality 0 --embed-metadata
@@ -12,12 +18,12 @@ Invarian yang dijaga (lihat AGENTS.md §5):
 Modul tetangga (dipisah supaya file ini mudah dirawat — jangan digabung lagi):
   * app/ytm.py    — cari_ytm(): pencarian katalog YouTube Music (InnerTube).
   * app/tags.py   — bersih_judul/bagi_judul/baca_tag/ada_sampul/unduh_sampul.
-  * app/thumbs.py — bersihkan_cache_gagal(): buang ikon default di Files.
 """
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -26,11 +32,10 @@ from collections import deque
 
 from .tags import (ada_sampul, baca_tag, bagi_judul, bersih_judul,
                    unduh_sampul)
-from .thumbs import bersihkan_cache_gagal
 from .ytm import cari_ytm
 
-YT_DLP = os.environ.get("YTMP3GUI_YTDLP", os.path.expanduser("~/.local/bin/yt-dlp"))
-FAKE = os.environ.get("YTMP3GUI_FAKE") == "1"  # dipakai tests/ (tanpa jaringan)
+YT_DLP = os.environ.get("RAVAAMD_YTDLP", os.path.expanduser("~/.local/bin/yt-dlp"))
+FAKE = os.environ.get("RAVAAMD_FAKE") == "1"  # dipakai tests/ (tanpa jaringan)
 
 # baris progres yt-dlp: "[download]  42.5% of    4.00MiB at  2.11MiB/s ETA 00:02"
 RE_PROG = re.compile(r"(\d+(?:\.\d+)?)% of")
@@ -56,7 +61,8 @@ class Job:
         self.percent = None
         self.lines: deque[str] = deque(maxlen=LOG_MAXLEN)
         self.exitcode = None
-        self.file = None          # path mp3 hasil unduhan (paling baru di folder)
+        self.file = None          # path mp3 hasil convert (di folder kerja job)
+        self.dir = None           # folder kerja per-job (dibuat di _run)
         self.video_id = None      # id video YouTube (untuk fallback cover)
         self.started = None
         self.ended = None
@@ -68,24 +74,71 @@ class Job:
             "status": self.status,
             "percent": self.percent,
             "exitcode": self.exitcode,
-            "file": self.file,
+            # nama dasar saja (bukan path server) — fetch memakai id job
+            "file": os.path.basename(self.file) if self.file else None,
             "lines": list(self.lines)[-tail:],
         }
 
 
 class JobManager:
-    """Worker thread tunggal; antrian FIFO; cancel mematikan proses jalan."""
+    """Worker thread tunggal; antrian FIFO; cancel mematikan proses jalan.
 
-    def __init__(self, folder: str = "", on_state_change=None):
-        self.folder = folder          # di-update handler /api/folder saat user ganti target
+    Folder kerja: env RAVAAMD_WORK (default $TMPDIR/ravaamd). Start membuang
+    sisa >1 jam (aman untuk instance kedua yang masih jalan); hasil job menunggu
+    di folder masing-masing sampai di-fetch, gagal, atau keluar history.
+    """
+
+    def __init__(self, on_state_change=None):
+        self.base = (os.environ.get("RAVAAMD_WORK")
+                     or os.path.join(tempfile.gettempdir(), "ravaamd"))
+        os.makedirs(self.base, exist_ok=True)
+        self._buang_sisa_start()
         self.lock = threading.RLock()
         self.queue: list[Job] = []
         self.history: deque[Job] = deque(maxlen=10)
         self.current: Job | None = None
         self.proc: subprocess.Popen | None = None
         self._cancel = False
+        self._dirs: dict[int, str] = {}   # id job done → folder kerjanya
         self.on_state_change = on_state_change or (lambda: None)
         threading.Thread(target=self._loop, daemon=True).start()
+
+    def _buang_sisa_start(self) -> None:
+        """Sisa folder job lama (>1 jam — sudah pasti bukan milik fetch aktif)
+        dibuang supaya server tak pernah disuruh membersihkan manual."""
+        batas = time.time() - 3600
+        try:
+            entri = os.listdir(self.base)
+        except OSError:
+            return
+        for nama in entri:
+            p = os.path.join(self.base, nama)
+            try:
+                if os.path.getmtime(p) < batas:
+                    shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) \
+                        else os.unlink(p)
+            except OSError:
+                pass
+
+    # ---- fetch: hasil convert dikirim ke perangkat lalu dihapus ----
+    def ambil(self, jid: int) -> str | None:
+        """Path absolut mp3 job done yang MENUNGGU dikirim; None bila tak ada."""
+        with self.lock:
+            job = next((j for j in self.history
+                        if j.id == jid and j.status == "done"), None)
+        if job and job.file and os.path.isfile(job.file):
+            return job.file
+        return None
+
+    def selesai_fetch(self, jid: int) -> None:
+        """Panggil SETELAH file terkirim penuh ke perangkat — buang foldernya.
+
+        Bila koneksi putus di tengah, pemanggil MENAHAN ini supaya file masih
+        ada untuk percobaan ulang (otomatis dibuang oleh purge berikutnya)."""
+        with self.lock:
+            d = self._dirs.pop(jid, None)
+        if d:
+            shutil.rmtree(d, ignore_errors=True)
 
     # ---- API dipanggil handler HTTP ----
     def add(self, query: str) -> Job:
@@ -130,12 +183,14 @@ class JobManager:
             if job is None:
                 time.sleep(0.25)
                 continue
-            self._run(job, self.folder)
+            self._run(job)
 
-    def _run(self, job: Job, folder: str):
+    def _run(self, job: Job):
         self._cancel = False
+        # folder kerja khusus job ini — hasil tak bercampur & mudah dibuang
+        job.dir = tempfile.mkdtemp(prefix=f"job-{job.id}-", dir=self.base)
         if FAKE:
-            self._run_fake(job, folder)
+            self._run_fake(job)
             self._finish(job)
             return
 
@@ -157,35 +212,34 @@ class JobManager:
         for i, url in enumerate(kandidat_urls):
             if i > 0:
                 job.lines.append("coba ulang via pencarian YouTube biasa…")
-            folder_before = set(os.listdir(folder))
-            code = self._jalankan_ytdlp(job, folder, url)
+            sebelum = set(os.listdir(job.dir))
+            code = self._jalankan_ytdlp(job, url)
             if code == 0:
                 break
         job.exitcode = code
         if code == 0:
-            new_audio = [
-                f for f in os.listdir(folder)
-                if f.lower().endswith(".mp3") and f not in folder_before
-            ] or [
-                f for f in os.listdir(folder)
-                if f.lower().endswith(".mp3") and os.path.getmtime(os.path.join(folder, f)) >= (job.started or 0) - 5
-            ]
-            if new_audio:
-                newest = max(new_audio, key=lambda f: os.path.getmtime(os.path.join(folder, f)))
-                job.file = os.path.join(folder, newest)
+            # mp3 hasil job = yang tidak ada sebelum yt-dlp jalan (folder kini
+            # per-job, jadi kandidatnya pasti milik job ini)
+            baru = [f for f in os.listdir(job.dir)
+                    if f.lower().endswith(".mp3") and f not in sebelum]
+            if baru:
+                newest = max(baru, key=lambda f: os.path.getmtime(os.path.join(job.dir, f)))
+                job.file = os.path.join(job.dir, newest)
             if job.file:
                 self._retag_terpisah(job, hint)
-            job.percent = 100.0
-        self._finish(job, error=(code != 0))
+                job.percent = 100.0
+            else:
+                job.lines.append("yt-dlp sukses tapi mp3 tidak ditemukan")
+        self._finish(job, error=(code != 0 or not job.file))
 
-    def _jalankan_ytdlp(self, job: Job, folder: str, url: str) -> int:
+    def _jalankan_ytdlp(self, job: Job, url: str) -> int:
         """Jalankan yt-dlp untuk SATU url; kembalikan exit code (bukan lempar)."""
         cmd = [
             YT_DLP, "-x", "--audio-format", "mp3", "--audio-quality", "0",
             "--embed-metadata", "--embed-thumbnail", "--no-playlist",
             "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
             "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
-            "-P", folder,
+            "-P", job.dir,
             "-o", "%(title)s.%(ext)s",
             url,
         ]
@@ -314,9 +368,9 @@ class JobManager:
                 except OSError:
                     pass
 
-    def _run_fake(self, job: Job, folder: str):
+    def _run_fake(self, job: Job):
         """Mode test: tanpa jaringan — meniru siklus progres lalu menulis file gagus."""
-        out = os.path.join(folder, f"uji-unduh-{job.id}.mp3")
+        out = os.path.join(job.dir, f"uji-unduh-{job.id}.mp3")
         for pct in (0.0, 40.0, 100.0):
             job.lines.append(f"[download]  {pct}% of    2.00MiB at  3.33MiB/s ETA 00:00")
             job.percent = pct
@@ -335,12 +389,15 @@ class JobManager:
             self.history.append(job)
             self.current = None
             self.proc = None
-        if job.status == "done":
-            # GNOME sempat meng-cache status "gagal" untuk file yang baru
-            # ditulis — bersihkan agar Files men-thumbnail cover dengan benar.
-            target = os.path.dirname(job.file) if job.file else self.folder
-            try:
-                bersihkan_cache_gagal(target)
-            except OSError:
-                pass  # cache thumbnail tidak boleh mengganggu status job
+            if job.status == "done" and job.file:
+                # menunggu dikirim ke perangkat; foldernya dijaga sampai fetch
+                self._dirs[job.id] = job.dir
+            elif job.dir:
+                # gagal/batal: hasil (parsial) langsung dibuang — server tak menyimpan
+                shutil.rmtree(job.dir, ignore_errors=True)
+            # job yang terdorong keluar history (overflow) → foldernya ikut dibuang
+            live = ({j.id for j in self.history} | {j.id for j in self.queue}
+                    | ({self.current.id} if self.current else set()))
+            for jid in [k for k in self._dirs if k not in live]:
+                shutil.rmtree(self._dirs.pop(jid), ignore_errors=True)
         self.on_state_change()

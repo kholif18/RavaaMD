@@ -1,19 +1,13 @@
-/* ytmp3-gui — logika UI (vanilla, tanpa framework, offline).
+/* RavaaMD — logika UI (vanilla, tanpa framework, offline).
    Pola: poll /api/state tiap 800 ms → render ulang penuh.
    Semua listener dipasang di DOMContentLoaded — TIDAK ada onclick inline.
    Semua teks dinamis (query/nama file) lewat esc() sebelum masuk HTML. */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const gb = (n) => n >= 1024 ** 3 ? gi(n) : n >= 1024 ** 2
-  ? (n / 1048576).toFixed(1) + " MB"
-  : (n / 1024).toFixed(0) + " KB";
-const gi = (n) => (n / 1073741824).toFixed(2) + " GB";
-const durasi = (s) => s == null ? "" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 const waktu = (t) => t ? new Date(t * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "";
 
 const IKON_NOTA = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 18.5A2.5 2.5 0 1 0 11 16V6.2l7-1.7v9.5A2.5 2.5 0 1 0 16 17.5V6L9 7.7v10.8Z"/></svg>`;
-const IKON_KOSONG = `<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 18.5A2.5 2.5 0 1 0 11 16V6.2l7-1.7v9.5A2.5 2.5 0 1 0 16 17.5V6L9 7.7v10.8Z"/></svg>`;
 
 async function api(path, body) {
   const opt = body !== undefined
@@ -39,6 +33,7 @@ const LABEL = { pending: "antre", running: "jalan", done: "selesai", error: "gag
 function liJob(job) {
   const pct = job.percent == null ? "" : `${Math.round(job.percent)}%`;
   const bawah = job.status === "pending" ? "menunggu…"
+    : job.status === "done" && job.file ? esc(job.file)  // hasil → nama file
     : [pct, waktu(job.started)].filter(Boolean).join(" · ");
   return `<li>
     <span class="item-utama">
@@ -46,23 +41,6 @@ function liJob(job) {
       <span class="item-bawah">${bawah}</span>
     </span>
     <span class="pil ${esc(job.status)}">${LABEL[job.status] || esc(job.status)}</span>
-  </li>`;
-}
-
-function barisPustaka(r) {
-  return `<li>
-    <span class="lib-ikon" aria-hidden="true">${IKON_NOTA}</span>
-    <span class="item-utama">
-      <span class="item-atas">${esc(r.name)}</span>
-      <span class="item-bawah">${durasi(r.duration)} · ${gb(r.size)}</span>
-    </span>
-    <button class="tombol-hapus" data-hapus="${esc(r.name)}"
-      title="Hapus file ini dari disk" aria-label="Hapus ${esc(r.name)}">
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M10 11v6m4-6v6"/>
-      </svg>
-    </button>
   </li>`;
 }
 
@@ -106,18 +84,6 @@ function render() {
 
   $("sejarah-wrap").hidden = !hist.length;
   $("sejarah").innerHTML = [...hist].reverse().map(liJob).join("");
-
-  // pustaka
-  const lib = state.library || [];
-  $("lib-count").textContent = lib.length;
-  $("lib").innerHTML = lib.length
-    ? lib.map(barisPustaka).join("")
-    : `<li class="kosong">${IKON_KOSONG}<b>Belum ada lagu</b>
-        <span>Unduh lagu pertamamu — langsung muncul di sini</span></li>`;
-
-  if (document.activeElement !== $("folder-input")) {
-    $("folder-input").value = state.folder || "";
-  }
 }
 
 /* ---- toast ---- */
@@ -162,7 +128,7 @@ function layarMati() {
     <div class="layar-mati">
       <span class="logo">${IKON_NOTA}</span>
       <h2>Aplikasi dimatikan</h2>
-      <p>Server ytmp3-gui sudah berhenti — boleh tutup tab ini.</p>
+      <p>Server RavaaMD sudah berhenti — boleh tutup tab ini.</p>
     </div>`;
 }
 
@@ -179,27 +145,6 @@ window.addEventListener("DOMContentLoaded", () => {
     await api("/api/shutdown", {});
     layarMati();
   });
-  $("btn-open").addEventListener("click", async () => {
-    const r = await api("/api/open-folder");
-    if (r.error) toast(r.error, "galat");  // container tanpa xdg-open → pesan jelas
-  });
-  $("btn-folder").addEventListener("click", async () => {
-    const f = $("folder-input").value.trim();
-    const r = await api("/api/folder", { folder: f });
-    if (r.error) toast(r.error, "galat");
-    else toast("Folder disimpan", "sukses");
-  });
-  $("lib").addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-hapus]");
-    if (!btn) return;
-    const nama = btn.dataset.hapus;
-    const ok = await konfirmasi({ judul: "Hapus lagu ini?", pesan: nama, ok: "Hapus" });
-    if (!ok) return;
-    const r = await api("/api/remove", { name: nama });
-    if (r.error) toast(r.error, "galat");
-    else toast(`"${nama}" dihapus dari disk`, "sukses");
-  });
-
   poll();
   window.setInterval(poll, 800);
 });
@@ -209,6 +154,66 @@ async function poll() {
   if (r.error) return;
   state = r;
   render();
+  tarikSelesai();
+}
+
+/* ---- tarik hasil convert ke perangkat (selesai → langsung terunduh) ----
+   Hanya tab yang MENGIRIM permintaan unduh yang menarik hasilnya:
+   sessionStorage bertahan saat reload tapi hilang saat tab ditutup —
+   tidak pernah ada unduhan kejutan dari sesi lama. Server menghapus file
+   hanya setelah terkirim penuh, jadi percobaan gagal boleh diulang (maks 3). */
+const K_MINTA = "ytmp3-minta", K_SUDAH = "ytmp3-sudah";
+function muatSet(k) {
+  try { return new Set(JSON.parse(sessionStorage.getItem(k) || "[]")); } catch { return new Set(); }
+}
+function simpanSet(k, s) {
+  try { sessionStorage.setItem(k, JSON.stringify([...s].slice(-30))); } catch { /* mode privat: OK */ }
+}
+const minta = muatSet(K_MINTA);   // id job yang diminta tab ini
+const sudah = muatSet(K_SUDAH);   // id yang sudah ditarik / menyerah
+const sedang = new Set();         // id sedang ditarik (cegah dobel antar-poll)
+const coba = {};                  // id → percobaan gagal
+
+async function tarikHasil(job) {
+  const id = job.id;
+  sedang.add(id);
+  try {
+    const res = await fetch("/api/fetch?id=" + id);
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || "HTTP " + res.status);
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = job.file;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+    sudah.add(id);
+    simpanSet(K_SUDAH, sudah);
+    toast(`"${job.file}" tersimpan di folder Downloads`, "sukses");
+  } catch (e) {
+    coba[id] = (coba[id] || 0) + 1;
+    if (coba[id] >= 3) {          // menyerah — jangan spam percobaan
+      sudah.add(id);
+      simpanSet(K_SUDAH, sudah);
+      toast(`Gagal mengambil "${job.file}": ${e.message}`, "galat");
+    }
+    // < 3 percobaan: id tidak ditandai → poll berikutnya mencoba lagi
+  } finally {
+    sedang.delete(id);
+  }
+}
+
+function tarikSelesai() {
+  if (!state) return;
+  for (const job of state.history || []) {
+    if (job.status !== "done" || !job.file) continue;
+    if (!minta.has(job.id) || sudah.has(job.id) || sedang.has(job.id)) continue;
+    tarikHasil(job);              // tanpa await — poll tetap jalan tiap 800 ms
+  }
 }
 
 async function unduh() {
@@ -222,6 +227,8 @@ async function unduh() {
   if (r.error) toast(r.error, "galat");
   else {
     $("q").value = "";
+    minta.add(r.job.id);          // tab ini berhak menarik hasil job ini
+    simpanSet(K_MINTA, minta);
     toast("Masuk antrian", "sukses");
   }
   render();

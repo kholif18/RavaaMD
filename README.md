@@ -1,9 +1,12 @@
-# ytmp3-gui
+# RavaaMD
 
-Aplikasi kasar-kasar pribadi untuk mengunduh lagu dari YouTube sebagai MP3
+Aplikasi pribadi untuk mengunduh lagu dari YouTube sebagai MP3
 **lengkap dengan tag judul-artis + sampul tertanam** — jadi Amberol (atau
 player lain) langsung menampilkan lagu dengan benar, tanpa pakai CLI dan
 tanpa situs downloader penuh iklan.
+
+*RavaaMD = **R**avaa **M**edia **D**ownloader.*
+
 
 Satu-satunya sihir di dalamnya: `yt-dlp` dijalankan dengan
 
@@ -14,7 +17,7 @@ Satu-satunya sihir di dalamnya: `yt-dlp` dijalankan dengan
 ## Cara pakai
 
 **Tombol launcher (paling gampang)** — setelah `bash install.sh` dijalankan
-sekali, tekan tombol *Activities* di GNOME dan cari **ytmp3-gui** (ikon nota
+sekali, tekan tombol *Activities* di GNOME dan cari **RavaaMD** (ikon nota
 biru-teal), lalu Enter.
 
 **Dari terminal**:
@@ -77,8 +80,12 @@ loopback DAN via IP LAN):
   port 8637 (kalau sibuk, aplikasi otomatis fallback ke 8638..8657 —
   tunnel jadi menunjuk port yang salah).
 - Folder musik = variabel `MUSIC_DIR` di compose (di-mount ke `/music`).
-- Tombol **Buka folder** tidak berfungsi di container (tanpa desktop) —
-  kini muncul pesan jelas, bukan error.
+### Cara kerja
+
+Browser di laptop/HP hanya **remote control**: ketik lagu, klik Unduh —
+server yang **convert** (yt-dlp + ffmpeg), lalu MP3 langsung **terunduh ke
+perangkatmu** seperti y2mate, dan dihapus dari server. Tak ada simpanan
+disini, tak perlu pembersihan manual.
 
 ### Dua jalur akses
 

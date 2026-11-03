@@ -1,4 +1,4 @@
-# AGENTS.md — ytmp3-gui (proyek TERPISAH dari Ravaa-POS)
+# AGENTS.md — RavaaMD (proyek TERPISAH dari Ravaa-POS)
 
 > WAJIB dibaca sebelum menyentuh repo ini. Proyek ini BERDIRI SENDIRI —
 > dilarang menyentuh `~/Projects/Ravaa-POS-v2` dari sesi agent ini (dan
@@ -35,13 +35,10 @@
   TANPA INI ekstraksi YouTube 2026 GAGAL dengan
   "No supported JavaScript runtime could be found". Node v22 ada di
   `/usr/bin/node`; `deno` TIDAK ada. Jangan hapus/timpa config itu.
-* `ffmpeg` 8.1.3 di PATH (dibutuhkan yt-dlp untuk `-x`, embed metadata &
-  thumbnail) + `ffprobe` (dipakai `app/library.py` untuk durasi).
+* `ffmpeg` 8.1.3 di PATH (dibutuhkan yt-dlp untuk `-x` + embed metadata/
+  thumbnail, dan ffmpeg untuk remux retag title/artist).
 * `~/.local/bin/ytmp3` = wrapper CLI (auto-`ytsearch1:` untuk input non-URL,
   folder default `$HOME/Music/My Musics`, override satu kali via `YTMP3_DIR`).
-* Env uji baru: `YTMP3GUI_THUMB_CACHE=<dir>` mengalihkan akar cache thumbnail
-  GNOME (default `~/.cache/thumbnails`) — dipakai tests/ supaya tidak
-  menyentuh cache asli user. Dibaca per-panggilan (bukan saat import).
 * Pencarian YouTube Music: yt-dlp TIDAK punya `ytmsearch` (diverifikasi
   2026-10-26). Karena itu `app/jobs.py` memanggil API InnerTube
   `music.youtube.com/youtubei/v1/search` (client WEB_REMIX, stdlib
@@ -57,14 +54,14 @@
 ## 3. Peta file (sumber kebenaran)
 
 ```
-run.py                 Pintu masuk. argparse (--port 8637, --folder,
-                       --host, --no-browser, --print-port), muat/simpan
-                       config, ambil_port(basis, host) (fallback +1..+20,
-                       port 0 = OS pilih), ThreadingHTTPServer di --host
-                       (DEFAULT 127.0.0.1;0.0.0.0 = akses LAN HANYA atas
-                       permintaan user, lihat §5; banner tampilkan IP LAN
+run.py                 Pintu masuk. argparse (--port 8637,
+                       --host, --no-browser, --print-port), ThreadingHTTPServer
+                       di --host (DEFAULT 127.0.0.1;0.0.0.0 = akses LAN HANYA
+                       atas permintaan user, lihat §5; banner tampilkan IP LAN
                        lewat _ip_lan()) + buka browser (webbrowser SETELAH
-                       bind sukses, timer 0.4s).
+                       bind sukses, timer 0.4s). Converter murni: tanpa folder
+                       config, hasil kerja di env RAVAAMD_WORK, dikirim ke
+                       perangkat via /api/fetch lalu dihapus.
 app/__init__.py        Menyimpan RESEP yt-dlp yang dikunci (dokumen inti).
 app/jobs.py            Job + JobManager. SATU worker thread (antrian FIFO,
                        urutan dijamin dijalankan sekaligus SEBELUM
@@ -73,13 +70,8 @@ app/jobs.py            Job + JobManager. SATU worker thread (antrian FIFO,
                        yt-dlp haruh "baris progres" MEMERLUKAN `--newline`
                        dan larang `--no-progress` (bug nyata: pasangan itu
                        MEMATIKAN bar progres GUI). Env:
-                       YTMP3GUI_FAKE=1  = siklus job tanpa jaringan (tests),
-                       YTMP3GUI_YTDLP=x = ganti path yt-dlp.
-                       JobManager(folder) menyimpan folder tujuan; handler
-                       /api/folder WAJIB ikut meng-update `jobs.folder`
-                       (worker membaca folder DARI situ saat jobMulai) —
-                       bug nyata: _loop dulunya memanggil _run(job) tanpa
-                       folder = TypeError job pertama.
+                       RAVAAMD_FAKE=1  = siklus job tanpa jaringan (tests),
+                       RAVAAMD_YTDLP=x = ganti path yt-dlp.
                        RANTAI PENCARIAN (input non-URL): URL eksplisit =
                        apa adanya; kalau bukan URL → cari_ytm() (InnerTube
                        YTM, prefer item ATV) dulu, kalau None/gagal →
@@ -90,13 +82,9 @@ app/jobs.py            Job + JobManager. SATU worker thread (antrian FIFO,
                        menimpa tag title/artist jadi TERPISAH
                        ("Sugar"/"Maroon 5", bukan "Maroon 5 - Sugar
                        (Official Music Video)"). FAKE mode: retag DILEWATI
-                       (file dummy). _finish memanggil
-                       bersihkan_cache_gagal() agar Files tidak nyangkut
-                       ikon default (lihat §8).
-                       PEMISAHAN MODUL (2026-11-03): helper sudah pindah
-                       ke app/ytm.py, app/tags.py, app/thumbs.py — JANGAN
-                       digabung lagi ke sini (alasan maintainability;
-                       jobs.py = antrian + orkestrasi yt-dlp saja).
+ PEMISAHAN MODUL: app/ytm.py + app/tags.py adalah satu-satunya helper
+                         (jobs.py = antrian + orkestrasi yt-dlp saja) — JANGAN
+                         digabung lagi.
 app/ytm.py            cari_ytm() + _runs_text()/_telusuri_items(): cari di
                        katalog YouTube Music via InnerTube WEB_REMIX (stdlib
                        urllib). Prefer item ATV; None bila gagal → pemanggil
@@ -106,13 +94,6 @@ app/tags.py           Helper tag/cover murni (argv list, tanpa state):
                        kurung; "(Kygo Remix)" dipertahankan), baca_tag() /
                        ada_sampul() (ffprobe), unduh_sampul() (JPEG
                        i.ytimg.com = jaring pengaman cover).
-app/thumbs.py         _thumb_root() (env YTMP3GUI_THUMB_CACHE), parser
-                       chunk PNG Thumb::URI, bersihkan_cache_gagal(folder):
-                       hapus entri fail-thumbnail GNOME
-                       (~/.cache/thumbnails/fail/**) yang Thumb::URI-nya
-                       di dalam folder; folder tak ada → 0 (aman container).
-app/library.py         scan(folder) + ffprobe durasi (cache per
-                       nama+size+mtime); AKHIRAN = daftar ekstensi audio
                        yang sah (dipakai guard /api/remove juga).
 app/server.py          Build_handler(ctx): statis + API JSON. Ctx(folder,
                        jobs, simpan_folder). Kontrak eksak lihat §4.
@@ -127,15 +108,14 @@ static/app.js          Polling /api/state tiap 800 ms → render ulang penuh;
                        ada onclick inline; esc() WAJIB dipakai untuk semua
                        teks user/YT yang dirender.
 icon.svg               Ikon nota biru-teal untuk .desktop.
-install.sh             Pasangkan launcher ~/.local/bin/ytmp3-gui + ikon
+install.sh             Pasangkan launcher ~/.local/bin/ravaamd + ikon
                        hicolor + entri ~/.local/share/applications/
-                       ytmp3-gui.desktop (tanpa sudo, AMAN dijalankan ulang).
+                       ravaamd.desktop (tanpa sudo, AMAN dijalankan ulang).
 tests/api-test.py      unittest stdlib; menyalakan run.py dengan
-                       YTMP3GUI_FAKE=1 di port bebas ACAK; 8 kasus (index,
-                       bentuk state, download kosong 400, traversal remove
-                       400, siklus job fake problem+, parse_progress,
-                       bagi_judul/bersih_judul (import dari app.tags),
-                       bersihkan_cache_gagal (import dari app.thumbs)).
+                       RAVAAMD_FAKE=1 di port bebas ACAK; 7 kasus (index,
+                       bentuk state, download kosong 400, fetch id invalid,
+                       siklus job fake + fetch, parse_progress,
+                       bagi_judul/bersih_judul (import dari app.tags)).
 README.md              Ringkasan pemakaian untuk user (Bahasa Indonesia).
 Dockerfile             Image container (python:3.14-slim + ffmpeg + node +
                        yt-dlp zipapp + config `--js-runtimes node` dibakar);
@@ -148,36 +128,27 @@ compose.yaml           docker compose: `network_mode: host` + `command:
                        Volume `${MUSIC_DIR}:/music:Z`, MUSIC_DIR wajib.
 ```
 
-Arah pakai: user membuka sesi agent di folder ini; `ytmp3-gui` (GUI) dan
-`ytmp3` (CLI) adalah DUA pintu yang menulis ke folder musik yang BISA SAMA —
+Arah pakai: user membuka sesi agent di folder ini; `RavaaMD` (GUI) dan
+`ytmp3` (CLI) adalah DUA pintu yang berbeda: GUI tidak menyimpan file (converter murni → kirim ke perangkat); CLI (`~/.local/bin/ytmp3`) menulis ke folder musik. Keduanya terpisah.
 job GUI harus jalanan sebelum CLI lain memutar file supaya tidak berebut.
 
 ## 4. Kontrak API internal (eksak — endpoint tidak boleh berisiko)
 
 * `GET /` + `/static/*` — file dari `static/`; guard traversal (ASCII path
   berawalan STATIC_DIR + os.sep). Mime dipecah dari AKHIRAN_STATIS.
-* `GET /api/state` -> `{folder, current, queue, history, library}` — SATU
-  sumber untuk seluruh UI; `current` null saat nganggur; `library` =
-  scan() folder aktif (bukan DB — baca disk langsung).
+* `GET /api/state` -> `{current, queue, history}` — SATU sumber untuk
+  seluruh UI; `current` null saat nganggur. Tidak ada folder/pustaka
+  (server = converter murni).
 * `POST /api/download` `{query}` -> 201 `{ok, job}` — 400 bila kosong atau
   > 300 char. Non-URL dicari di YouTube Music dulu (cari_ytm di app/ytm.py,
   prefer trek ATV resmi) lalu fallback `ytsearch1:` — rantai di jobs.py
   (BUKAN di server), URL persis dihadapkan apa adanya.
 * `POST /api/cancel` `{}` -> `{ok, batal}` — batal=false bila tidak ada
   proses jalan (BUKAN error).
-* `POST /api/folder` `{folder}` -> 200 `{ok, folder}` — WAJIB absolute
-  (`/` atau `~`), os.path.expanduser, isdir check, dan SIMPAN via
-  simpan_folder (config.json). 400 bila folder tidak ada.
-* `POST /api/remove` `{name}` -> 200 `{ok, name}` — guard TIGA lapis:
-  basename persis (cegah `../`), bukan `''`/`.`/`..`, ekstensi di
-  AKHIRAN. 404 bila file tidak ada. UI harus confirmDialog dulu.
 * `POST /api/shutdown` `{}` -> 200 lalu shutdown thread terpisah
   (memanggil server.shutdown() dari DLM handler = deadlock). Body nol byte
   dilarang? TIDAK untuk route ini: shutdown DIPERBOLEHKAN tanpa body (UI
   mengirim `{}`, tapi jangan menolak bila kosong).
-* `GET /api/open-folder` — xdg-open folder aktif (GET, bukan POST — tombolnya).
-  Bila `xdg-open` tidak ada (container tanpa desktop) → **501** `{error}`
-  anggun; traceback/koneksi mati = bug (sudah diperbaiki 2026-11-03).
 * Bentuk job (to_dict): `{id, query, status: pending|running|done|error|
   canceled, percent|null, exitcode|null, file|null, lines:[..]}`.
   `percent` hanya terisi bila regex kena; `history` maks 10 (deque).
@@ -227,13 +198,13 @@ python3 run.py                     # GUI -> http://127.0.0.1:8637 (fallback +1..
 python3 run.py --no-browser        # untuk pengujian (tests/ dan curl)
 python3 run.py --folder /tmp/opencode/gui-test --no-browser --print-port
 python3 run.py --host 0.0.0.0 --no-browser   # dengar di LAN juga (tanpa auth, §5)
-python3 tests/api-test.py          # unittest, env YTMP3GUI_FAKE=1 otomatis, tanpa jaringan
+python3 tests/api-test.py          # unittest, env RAVAAMD_FAKE=1 otomatis, tanpa jaringan
 bash install.sh                    # pasang launcher + .desktop + ikon (idempoten)
-~/.local/bin/ytmp3-gui             # launcher GUI (setelah install.sh)
+~/.local/bin/ravaamd             # launcher GUI (setelah install.sh)
 # deploy container (dokumentasi lengkap di README bagian Docker):
 MUSIC_DIR="$HOME/Music/My Musics" docker compose up -d --build   # app :8637
 docker compose down                # hentikan container
-docker build -t ytmp3-gui .        # build saja (gate: suite tes jalan di dalam)
+docker build -t ravaamd .        # build saja (gate: suite tes jalan di dalam)
 # upgrade downloader bila unduhan mendadak gagal semua:
 yt-dlp -U
 # git (repo publik, init 2026-11-03): remote git@github.com:kholif18/RavaaMD.git

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Uji API + siklus job ytmp3-gui (unittest stdlib, tanpa jaringan panggilan nyata
-YouTube — unduhan NYATA diuji terpisah, lihat AGENTS.md §5).
+"""Uji API + siklus job RavaaMD (unittest stdlib, tanpa jaringan panggilan nyata
+YouTube — unduhan NYATA diuji terpisah, lihat AGENTS.md §7).
 
 Jalankan: python3 tests/api-test.py
-Menyalakan run.py dengan env YTMP3GUI_FAKE=1 supaya siklus job berjalan tanpa yt-dlp.
+Menyalakan run.py dengan env RAVAAMD_FAKE=1 supaya siklus job berjalan tanpa yt-dlp.
 """
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -18,6 +19,9 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from app.jobs import parse_progress  # noqa: E402
+
+# isi file palsu buatan mode FAKE (harus sama dengan app/jobs.py _run_fake)
+FAKE_BYTES = b"ID3\x03\x00\x00\x00" + b"\x00" * 64
 
 
 def _bebas_port():
@@ -33,6 +37,16 @@ def _url(port, path):
 def _get(port, path):
     with urllib.request.urlopen(_url(port, path), timeout=5) as r:
         return r.status, json.loads(r.read() or b"{}")
+
+
+def _get_bin(port, path):
+    """GET yang mengembalikan (status, bytes mentah) — untuk /api/fetch."""
+    try:
+        with urllib.request.urlopen(_url(port, path), timeout=5) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        with e:
+            return e.code, e.read(), dict(e.headers)
 
 
 def _post(port, path, data):
@@ -56,15 +70,13 @@ class TestApi(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.folder = tempfile.mkdtemp(prefix="ytmp3gui-uji-")
-        cls.thumb_root = tempfile.mkdtemp(prefix="ytmp3gui-tc-")
-        env = {**os.environ, "YTMP3GUI_FAKE": "1",
-               "YTMP3GUI_THUMB_CACHE": cls.thumb_root}
+        cls.kerja = tempfile.mkdtemp(prefix="ravaamd-kerja-")  # folder kerja terisolasi
+        env = {**os.environ, "RAVAAMD_FAKE": "1", "RAVAAMD_WORK": cls.kerja}
         for attempt in range(3):
             cls.port = _bebas_port()
             cls.proc = subprocess.Popen(
                 [sys.executable, os.path.join(ROOT, "run.py"),
-                 "--port", str(cls.port), "--no-browser", "--folder", cls.folder],
+                 "--port", str(cls.port), "--no-browser"],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
             for _ in range(50):
@@ -83,11 +95,7 @@ class TestApi(unittest.TestCase):
     def tearDownClass(cls):
         cls.proc.terminate()
         cls.proc.wait(timeout=5)
-        for f in os.listdir(cls.folder):
-            os.remove(os.path.join(cls.folder, f))
-        os.rmdir(cls.folder)
-        import shutil
-        shutil.rmtree(cls.thumb_root, ignore_errors=True)
+        shutil.rmtree(cls.kerja, ignore_errors=True)
 
     def test_01_index_html(self):
         status, html, _ = self._html()
@@ -101,22 +109,29 @@ class TestApi(unittest.TestCase):
     def test_02_state_bentuk(self):
         status, st = _get(self.port, "/api/state")
         self.assertEqual(status, 200)
-        for kunci in ("folder", "current", "queue", "history", "library"):
+        for kunci in ("current", "queue", "history"):
             self.assertIn(kunci, st)
-        self.assertEqual(st["folder"], self.folder)
+        # server converter murni: TANPA folder & pustaka
+        self.assertNotIn("folder", st)
+        self.assertNotIn("library", st)
         self.assertEqual(st["current"], None)
-        self.assertEqual(st["library"], [])
+        self.assertEqual(st["queue"], [])
+        self.assertEqual(st["history"], [])
 
     def test_03_download_kosong_ditolak(self):
         status, r = _post(self.port, "/api/download", {"query": ""})
         self.assertEqual(status, 400)
         self.assertIn("error", r)
 
-    def test_04_download_serangan_traversal_remove(self):
-        status, r = _post(self.port, "/api/remove", {"name": "../../etc/passwd"})
+    def test_04_fetch_id_invalid_ditolak(self):
+        # traversal lewat nama file mustahil — fetch hanya menerima id job int
+        status, body, _ = _get_bin(self.port, "/api/fetch?id=../../etc/passwd")
         self.assertEqual(status, 400)
+        self.assertIn("error", body.decode())
+        status, body, _ = _get_bin(self.port, "/api/fetch?id=999999")
+        self.assertEqual(status, 404)
 
-    def test_05_siklus_job_fake(self):
+    def test_05_siklus_job_fake_lalu_fetch(self):
         status, r = _post(self.port, "/api/download", {"query": "uji lagu"})
         self.assertEqual(status, 201)
         jid = r["job"]["id"]
@@ -125,7 +140,7 @@ class TestApi(unittest.TestCase):
         for _ in range(60):
             time.sleep(0.2)
             _, st = _get(self.port, "/api/state")
-            cur, hist, lib = st["current"], st["history"], st["library"]
+            cur, hist = st["current"], st["history"]
             if cur is None and hist:
                 terakhir = hist[0]
                 break
@@ -133,9 +148,19 @@ class TestApi(unittest.TestCase):
         self.assertEqual(terakhir["id"], jid)
         self.assertEqual(terakhir["status"], "done")
         self.assertTrue(terakhir["file"], "job fake harus mencatat file hasil")
-        # pustaka ikut memuatnya setelah selesai (scan otomatis)
-        _, st = _get(self.port, "/api/state")
-        self.assertTrue(st["library"], "pustaka harus memuat file hasil fake job")
+        self.assertNotIn("/", terakhir["file"], "file di state = nama dasar saja")
+        # fetch: isi file persis hasil convert + header attachment
+        status, body, hdr = _get_bin(self.port, f"/api/fetch?id={jid}")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, FAKE_BYTES, "isi yang diterima = isi asli file")
+        self.assertIn("attachment", hdr.get("Content-Disposition", ""))
+        # server tidak menyimpan: setelah terkirim, folder kerja job dibuang
+        time.sleep(0.2)
+        self.assertEqual(os.listdir(self.kerja), [],
+                         "folder kerja harus kosong setelah fetch")
+        # fetch ulang = 404 (sudah terkirim & dihapus)
+        status, _, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
+        self.assertEqual(status, 404)
 
     def test_06_parse_progress(self):
         self.assertEqual(parse_progress("[download]  42.5% of    4.00MiB at  2.11MiB/s ETA 00:01"), 42.5)
@@ -162,37 +187,7 @@ class TestApi(unittest.TestCase):
         self.assertEqual(bersih_judul("Keane - Somewhere Only We Know", "Keane"),
                          "Somewhere Only We Know")
 
-    def test_08_failcache_thumbnail_dibersihkan(self):
-        import struct
-        from app.thumbs import bersihkan_cache_gagal
-        os.environ["YTMP3GUI_THUMB_CACHE"] = self.thumb_root
-        try:
-            fail_dir = os.path.join(self.thumb_root, "fail", "gnome-thumbnail-factory")
-            os.makedirs(fail_dir, exist_ok=True)
 
-            def png(uri: bytes) -> bytes:
-                def chunk(t, payload):
-                    return (struct.pack(">I", len(payload)) + t + payload
-                            + b"\x00\x00\x00\x00")  # CRC boleh nol — parser tak memeriksanya
-                return (b"\x89PNG\r\n\x1a\n"
-                        + chunk(b"IHDR", b"\x00" * 13)
-                        + chunk(b"tEXt", b"Thumb::URI\x00" + uri)
-                        + chunk(b"IEND", b""))
-
-            sesudah = "file:///tmp/uji-ytmp3/sesudah.mp3"   # cocok folder uji
-            sebelum = "file:///home/enma/Music/My%20Musics/lama.mp3"  # bukan folder uji
-            with open(os.path.join(fail_dir, "sesudah.png"), "wb") as f:
-                f.write(png(sesudah.encode()))
-            with open(os.path.join(fail_dir, "lama.png"), "wb") as f:
-                f.write(png(sebelum.encode()))
-            n = bersihkan_cache_gagal("/tmp/uji-ytmp3")
-            self.assertEqual(n, 1)
-            self.assertFalse(os.path.exists(os.path.join(fail_dir, "sesudah.png")))
-            self.assertTrue(os.path.exists(os.path.join(fail_dir, "lama.png")))
-            # tidak ada entri yang cocok → 0
-            self.assertEqual(bersihkan_cache_gagal("/tmp/tidak-ada"), 0)
-        finally:
-            os.environ.pop("YTMP3GUI_THUMB_CACHE", None)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import threading
 import urllib.parse
 from http import HTTPStatus
@@ -34,14 +33,10 @@ def _akhiran(path: str) -> str:
 
 
 class Ctx:
-    """State bersama yang diisi run.py: folder aktif + JobManager + simpan config."""
+    """State bersama yang diisi run.py: JobManager + referensi server."""
 
-    def __init__(self, folder: str, jobs, simpan_folder=None):
-        from app import library
-        self.folder = folder
+    def __init__(self, jobs):
         self.jobs = jobs
-        self.library = library
-        self.simpan_folder = simpan_folder or (lambda _f: None)
         self.server = None  # diisi run.py setelah bind
 
 
@@ -85,12 +80,6 @@ def build_handler(ctx: Ctx) -> type:
                 raise ValueError("payload tidak wajar")
             return json.loads(self.rfile.read(n) or b"{}")
 
-        def _state(self) -> dict:
-            st = {"folder": ctx.folder}
-            st.update(ctx.jobs.state())
-            st["library"] = ctx.library.scan(ctx.folder)
-            return st
-
         def _shutdown(self) -> None:
             self._json(200, {"ok": True, "pesan": "server dimatikan"})
             t = threading.Thread(target=(ctx.server or self.server).shutdown, daemon=True)
@@ -98,22 +87,51 @@ def build_handler(ctx: Ctx) -> type:
 
         # ---- GET ----
         def do_GET(self):
-            url = urllib.parse.urlparse(self.path).path
-            if url.startswith("/api/"):
-                if url == "/api/state":
-                    return self._json(200, self._state())
-                if url == "/api/open-folder":
-                    # container/tanpa desktop: xdg-open tidak ada → JSON anggun,
-                    # jangan lempar traceback (koneksi mati di tengah).
-                    if shutil.which("xdg-open") is None:
-                        return self._json(501, {
-                            "error": "xdg-open tidak tersedia di mesin ini "
-                                     "(container tanpa desktop)"})
+            parsed = urllib.parse.urlparse(self.path)
+            url = parsed.path
+            if url == "/api/state":
+                return self._json(200, ctx.jobs.state())
+            if url == "/api/fetch":
+                # kirim hasil convert ke perangkat peminat (lalu job buang folder)
+                raw = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+                try:
+                    jid = int(raw)
+                except ValueError:
+                    return self._bad("id job tidak valid")
+                path = ctx.jobs.ambil(jid)
+                if not path:
+                    return self._bad("file tidak ada (sudah terkirim atau belum selesai)",
+                                     404)
+                nama = os.path.basename(path)
+                try:
+                    fh = open(path, "rb")
+                    ukuran = os.path.getsize(path)
+                except OSError:
+                    return self._bad("file tidak bisa dibaca", 404)
+                with fh:
+                    # filename ASCII aman + filename* UTF-8 (nama berspasi/emoji)
+                    ascii_nama = nama.encode("ascii", "replace").decode().replace('"', "")
+                    self.send_response(200)
+                    self.send_header(
+                        "Content-Type",
+                        "audio/mpeg" if nama.lower().endswith(".mp3")
+                        else "application/octet-stream")
+                    self.send_header(
+                        "Content-Disposition",
+                        f"attachment; filename=\"{ascii_nama}\"; "
+                        f"filename*=UTF-8''{urllib.parse.quote(nama)}")
+                    self.send_header("Content-Length", str(ukuran))
+                    self.end_headers()
                     try:
-                        subprocess.Popen(["xdg-open", ctx.folder])
-                    except OSError as e:
-                        return self._json(500, {"error": f"gagal buka folder: {e}"})
-                    return self._json(200, {"ok": True})
+                        shutil.copyfileobj(fh, self.wfile, 1 << 16)
+                    except (OSError, ConnectionError):
+                        # koneksi putus di tengah: TAHAN file-nya supaya client
+                        # boleh coba lagi (pembersihan tetap otomatis, lihat jobs)
+                        return
+                # terkirim penuh → server tidak menyimpan hasil convert
+                ctx.jobs.selesai_fetch(jid)
+                return
+            if url.startswith("/api/"):
                 return self._bad("endpoint tidak ada", 404)
             return self._statis(url)
 
@@ -137,30 +155,6 @@ def build_handler(ctx: Ctx) -> type:
             if url == "/api/cancel":
                 mungkin = ctx.jobs.cancel()
                 return self._json(200, {"ok": True, "batal": mungkin})
-
-            if url == "/api/folder":
-                f = str(data.get("folder", "")).strip()
-                if not (f.startswith("/") or f.startswith("~")):
-                    return self._bad("folder harus absolute path")
-                f = os.path.expanduser(f)
-                if not os.path.isdir(f):
-                    return self._bad("folder tidak ada")
-                ctx.folder = f
-                ctx.jobs.folder = f  # worker membaca folder DARI SINI saat job mulai
-                ctx.simpan_folder(f)
-                return self._json(200, {"ok": True, "folder": ctx.folder})
-
-            if url == "/api/remove":
-                name = str(data.get("name", ""))
-                # guard: HANYA nama dasar (cegah traversal `../`), ekstensi audio sah
-                if (os.path.basename(name) != name or name in ("", ".", "..")
-                        or os.path.splitext(name)[1].lower() not in ctx.library.AKHIRAN):
-                    return self._bad("nama file tidak valid")
-                path = os.path.join(ctx.folder, name)
-                if not os.path.isfile(path):
-                    return self._bad("file tidak ada", 404)
-                os.remove(path)
-                return self._json(200, {"ok": True, "name": name})
 
             if url == "/api/shutdown":
                 return self._shutdown()

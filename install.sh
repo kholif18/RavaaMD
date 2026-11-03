@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Pasang pintu akses GUI ke GNOME (tanpa sudo):
-#   ~/.local/bin/ytmp3-gui              → launcher
-#   ~/.local/share/icons/hicolor/…/ytmp3-gui.svg (ikon)
-#   ~/.local/share/applications/ytmp3-gui.desktop  (muncul di Activities)
+#   ~/.local/bin/ravaamd                → launcher
+#   ~/.local/share/icons/hicolor/…/ravaamd.svg (ikon)
+#   ~/.local/share/applications/ravaamd.desktop  (muncul di Activities)
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
-BIN="$HOME/.local/bin/ytmp3-gui"
-DESK="$HOME/.local/share/applications/ytmp3-gui.desktop"
+BIN="$HOME/.local/bin/ravaamd"
+DESK="$HOME/.local/share/applications/ravaamd.desktop"
 
 mkdir -p "$ICON_DIR" "$HOME/.local/bin" "$HOME/.local/share/applications"
-cp "$DIR/icon.svg" "$ICON_DIR/ytmp3-gui.svg"
+cp "$DIR/icon.svg" "$ICON_DIR/ravaamd.svg"
 
 # launcher — link/eksekusi via path absolut supaya .desktop tidak kehilangan cwd
 cat > "$BIN.tmp" <<EOF
@@ -24,11 +24,11 @@ mv "$BIN.tmp" "$BIN"
 cat > "$DESK.tmp" <<EOF
 [Desktop Entry]
 Type=Application
-Name=ytmp3-gui
+Name=RavaaMD
 GenericName=YouTube → MP3 Downloader
-Comment=Unduh MP3 lengkap metadata + cover untuk Amberol
+Comment=Ravaa Media Downloader — unduh MP3 lengkap metadata + cover untuk Amberol
 Exec=$BIN
-Icon=ytmp3-gui
+Icon=ravaamd
 Terminal=false
 Categories=AudioVideo;Network;
 EOF
@@ -37,4 +37,4 @@ mv "$DESK.tmp" "$DESK"
 command -v update-desktop-database >/dev/null && update-desktop-database "$HOME/.local/share/applications" || true
 echo "Pasang OK:"
 echo "  • launcher : $BIN"
-echo "  • activities: 'ytmp3-gui' (ikon nota biru-teal)"
+echo "  • activities: 'RavaaMD' (ikon nota biru-teal)"
