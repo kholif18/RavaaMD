@@ -139,9 +139,9 @@ function layarMati() {
 function pilihTab(fmt) {
   formatTerpilih = fmt;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("aktif"));
-  $(`.tab-btn[data-fmt="${fmt}"]`).classList.add("aktif");
+  document.querySelector(`.tab-btn[data-fmt="${fmt}"]`).classList.add("aktif");
   document.querySelectorAll(".qual-panel").forEach(p => p.classList.remove("aktif"));
-  $(`#qual-${fmt}`).classList.add("aktif");
+  document.querySelector(`#qual-${fmt}`).classList.add("aktif");
 }
 
 /* ---- event listeners ---- */
