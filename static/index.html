@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>RavaaMD</title>
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <div class="orb orb-1" aria-hidden="true"></div>
@@ -136,8 +136,27 @@
     </div>
   </div>
 
+  <!-- modal progress download -->
+  <div id="dmodal" class="modal" hidden>
+    <div class="dmodal-kotak" role="dialog" aria-modal="true">
+      <h3 id="dmodal-query" class="dmodal-query"></h3>
+      <span id="dmodal-status" class="pil pending">queued</span>
+      <div class="progres"><div id="dmodal-bar" class="progres-isi"></div></div>
+      <div class="dmodal-kepala">
+        <span id="dmodal-pct" class="job-kini-pct">0%</span>
+        <button id="dmodal-cancel" class="btn bahaya-kecil" type="button">Cancel</button>
+      </div>
+      <button id="dmodal-download" class="btn utama dmodal-dl" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+        Download file
+      </button>
+      <p id="dmodal-pesan" class="dmodal-pesan"></p>
+      <button id="dmodal-close" class="btn hantu kecil" type="button">Close</button>
+    </div>
+  </div>
+
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -186,6 +186,24 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
+
+  // download modal buttons
+  $("dmodal-download").addEventListener("click", () => {
+    if (djobId == null) return;
+    // user gesture → browser mengizinkan unduhan via navigasi
+    window.location.href = "/api/fetch?id=" + djobId;
+    sudah.add(djobId);
+    simpanSet(K_SUDAH, sudah);
+    $("dmodal-download").hidden = true;
+    $("dmodal-pesan").textContent = "Download started — check your Downloads folder.";
+  });
+  $("dmodal-cancel").addEventListener("click", async () => {
+    await api("/api/cancel", {});
+  });
+  $("dmodal-close").addEventListener("click", () => {
+    $("dmodal").hidden = true;
+    djobId = null;
+  });
   $("btn-exit").addEventListener("click", async () => {
     const ok = await konfirmasi({
       judul: "Quit application?",
@@ -206,7 +224,7 @@ async function poll() {
   if (r.error) return;
   state = r;
   render();
-  tarikSelesai();
+  pollModal();
 }
 
 /* ---- fetch result ---- */
@@ -274,6 +292,61 @@ async function unduhSekarang(jid) {
 }
 
 /* ---- download: show info box then call API ---- */
+/* ---- download modal state ---- */
+let djobId = null;
+
+function bukaModal(job) {
+  djobId = job.id;
+  $("dmodal-query").textContent = job.query;
+  $("dmodal-pct").textContent = "0%";
+  $("dmodal-bar").style.width = "0%";
+  $("dmodal-bar").classList.remove("indeterminate");
+  $("dmodal-download").hidden = true;
+  $("dmodal-pesan").textContent = "";
+  $("dmodal-cancel").hidden = job.status !== "running";
+  setPilModal(job.status);
+  $("dmodal").hidden = false;
+}
+
+function setPilModal(status) {
+  const el = $("dmodal-status");
+  el.className = `pil ${status}`;
+  el.textContent = LABEL[status] || status;
+}
+
+function perbaruiModal(job) {
+  if (!job) return;
+  setPilModal(job.status);
+  if (job.status === "running") $("dmodal-cancel").hidden = false;
+  if (job.percent != null) {
+    $("dmodal-bar").classList.remove("indeterminate");
+    $("dmodal-bar").style.width = job.percent + "%";
+    $("dmodal-pct").textContent = Math.round(job.percent) + "%";
+  } else {
+    $("dmodal-bar").classList.add("indeterminate");
+  }
+  if (job.status === "done") {
+    $("dmodal-download").hidden = false;
+    $("dmodal-cancel").hidden = true;
+    $("dmodal-pesan").textContent = `Ready: ${job.file}`;
+  } else if (job.status === "error") {
+    $("dmodal-download").hidden = true;
+    $("dmodal-cancel").hidden = true;
+    $("dmodal-pesan").textContent = "Download failed — check the log panel.";
+  } else if (job.status === "canceled") {
+    $("dmodal-download").hidden = true;
+    $("dmodal-cancel").hidden = true;
+    $("dmodal-pesan").textContent = "Download canceled.";
+  }
+}
+
+function pollModal() {
+  if (djobId == null || !state) return;
+  const job = [...(state.history || []), ...(state.queue || []), state.current]
+    .find(j => j && j.id === djobId);
+  if (job) perbaruiModal(job);
+}
+
 async function unduh(fmt, qual) {
   if (tombolJalan) return;
   const q = querySedang.trim();
@@ -292,6 +365,7 @@ async function unduh(fmt, qual) {
     $("q").value = "";
     minta.add(r.job.id);
     simpanSet(K_MINTA, minta);
+    bukaModal(r.job);
     toast("Added to queue", "sukses");
   }
   render();
