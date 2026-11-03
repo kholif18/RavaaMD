@@ -35,11 +35,15 @@ function liJob(job) {
   const bawah = job.status === "pending" ? "waiting…"
     : job.status === "done" && job.file ? esc(job.file)
     : [pct, waktu(job.started)].filter(Boolean).join(" · ");
+  const dlBtn = job.status === "done" && job.file
+    ? `<button class="dl-btn" data-id="${job.id}">Download</button>`
+    : "";
   return `<li>
     <span class="item-utama">
       <span class="item-atas">${esc(job.query)}</span>
       <span class="item-bawah">${bawah}</span>
     </span>
+    ${dlBtn}
     <span class="pil ${esc(job.status)}">${LABEL[job.status] || esc(job.status)}</span>
   </li>`;
 }
@@ -166,6 +170,16 @@ window.addEventListener("DOMContentLoaded", () => {
     b.addEventListener("click", () => unduh(b.dataset.fmt, b.dataset.qual));
   });
 
+  // Manual download for completed jobs (event delegation — innerHTML is replaced each poll)
+  $("sejarah").addEventListener("click", (e) => {
+    const btn = e.target.closest(".dl-btn");
+    if (btn) unduhSekarang(Number(btn.dataset.id));
+  });
+  $("queue").addEventListener("click", (e) => {
+    const btn = e.target.closest(".dl-btn");
+    if (btn) unduhSekarang(Number(btn.dataset.id));
+  });
+
   // Close info box
   $("btn-info-close").addEventListener("click", () => {
     $("info-box").hidden = true;
@@ -247,6 +261,15 @@ function tarikSelesai() {
     if (!minta.has(job.id) || sudah.has(job.id) || sedang.has(job.id)) continue;
     tarikHasil(job);
   }
+}
+
+/* ---- manual download for completed job ---- */
+async function unduhSekarang(jid) {
+  if (!state) return;
+  const job = [...(state.history || []), ...(state.queue || []), state.current]
+    .find(j => j && j.id === jid);
+  if (!job || !job.file) return;
+  await tarikHasil(job);
 }
 
 /* ---- download: show info box then call API ---- */
