@@ -30,6 +30,7 @@ import tempfile
 import threading
 import time
 from collections import deque
+from urllib.parse import urlencode, urlunparse, urlparse, parse_qs
 
 from .tags import (ada_sampul, baca_tag, bagi_judul, bersih_judul,
                    unduh_sampul)
@@ -49,6 +50,35 @@ FORMAT_DEFAULT = "mp3"
 MP4_RESOLUSI = {"best", "1080p", "720p", "480p", "360p"}
 MP3_BITRATE = {"best", "320k", "256k", "192k", "128k"}
 QUALITY_DEFAULT = "best"
+
+
+def bersih_url_youtube(url: str) -> str:
+    """Hapus parameter tracking YouTube (&pp, &si, &feature, &utm_* dst).
+
+    https://www.youtube.com/watch?v=8EaL3CgiCAs&pp=ygUP...
+    -> https://www.youtube.com/watch?v=8EaL3CgiCAs
+    """
+    try:
+        p = urlparse(url)
+        netloc = p.netloc.lower()
+        if "youtube.com" not in netloc and "youtu.be" not in netloc:
+            return url
+        q = parse_qs(p.query, keep_blank_values=True)
+        penting = {}
+        for k in ("v", "list", "index", "t", "start", "end"):
+            if k in q:
+                penting[k] = q[k][0]
+        if "youtu.be" in netloc:
+            vid = p.path.lstrip("/") or penting.get("v", "")
+            penting["v"] = vid
+            baru = urlunparse(("https", "www.youtube.com", "/watch",
+                               "", urlencode(penting), ""))
+        else:
+            baru = urlunparse((p.scheme, p.netloc, p.path, "",
+                               urlencode(penting), ""))
+        return baru
+    except Exception:
+        return url
 
 
 def parse_progress(line: str):
@@ -219,8 +249,11 @@ class JobManager:
         hint = None
         kandidat_urls = []
         if job.query.startswith(("http://", "https://")):
-            # URL eksplisit: gunakan apa adanya (baik mp3 maupun mp4)
-            kandidat_urls.append(job.query)
+            # URL eksplisit: bersihkan parameter tracking YouTube dulu
+            url_bersih = bersih_url_youtube(job.query)
+            if url_bersih != job.query:
+                job.lines.append(f"URL dibersihkan: parameter tracking dihilangkan")
+            kandidat_urls.append(url_bersih)
         elif job.format == "mp4":
             # MP4: YouTube dulu (video), fallback YouTube Music
             kandidat_urls.append("ytsearch1:" + job.query)
@@ -289,58 +322,69 @@ class JobManager:
         """
         if fmt == "mp4":
             if quality == "best":
-                fmt_opt = "best"
+                format_opts = ["best"]
             else:
                 h = quality.rstrip("p")
-                fmt_opt = (f"bestvideo[height<={h}]+bestaudio/"
-                           f"best[height<={h}]")
-            cmd = [
-                YT_DLP, "-f", fmt_opt, "--merge-output-format", "mp4",
-                "--embed-metadata", "--embed-thumbnail", "--no-playlist",
-                "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
-                "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
-                "-P", job.dir,
-                "-o", "%(title)s.%(ext)s",
-                url,
-            ]
+                spesifik = (f"bestvideo[height<={h}]+bestaudio/"
+                            f"best[height<={h}]")
+                format_opts = [spesifik, "best"]
         else:
             # mp3 — resep terkunci, jangan diubah
-            cmd = [
-                YT_DLP, "-x", "--audio-format", "mp3", "--audio-quality", "0",
-                "--embed-metadata", "--embed-thumbnail", "--no-playlist",
-                "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
-                "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
-                "-P", job.dir,
-                "-o", "%(title)s.%(ext)s",
-                url,
-            ]
-        job.lines.append("$ " + " ".join(cmd))
-        try:
-            proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, errors="replace", bufsize=1,
-            )
-        except OSError as e:
-            job.lines.append(f"failed to start yt-dlp: {e}")
-            return -1
-        with self.lock:
-            self.proc = proc
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-            if line.startswith("VIDEO_ID:"):
-                vid = line[9:].strip()
-                if re.fullmatch(r"[\w-]{11}", vid):
-                    job.video_id = vid
-                continue  # baris teknis, jangan tampilkan di log GUI
-            job.lines.append(line)
-            pct = parse_progress(line)
-            if pct is not None:
-                job.percent = pct
-        code = proc.wait()
-        self.proc = None
+            format_opts = ["-x --audio-format mp3 --audio-quality 0"]
+        code = 1
+        for fmt_opt in format_opts:
+            if fmt == "mp4":
+                cmd = [
+                    YT_DLP, "-f", fmt_opt, "--merge-output-format", "mp4",
+                    "--embed-metadata", "--embed-thumbnail", "--no-playlist",
+                    "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
+                    "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
+                    "-P", job.dir,
+                    "-o", "%(title)s.%(ext)s",
+                    url,
+                ]
+            else:
+                # mp3 — resep terkunci, jangan diubah
+                cmd = [
+                    YT_DLP, "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                    "--embed-metadata", "--embed-thumbnail", "--no-playlist",
+                    "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
+                    "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
+                    "-P", job.dir,
+                    "-o", "%(title)s.%(ext)s",
+                    url,
+                ]
+            job.lines.append("$ " + " ".join(cmd))
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, errors="replace", bufsize=1,
+                )
+            except OSError as e:
+                job.lines.append(f"failed to start yt-dlp: {e}")
+                return -1
+            with self.lock:
+                self.proc = proc
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.rstrip()
+                if not line:
+                    continue
+                if line.startswith("VIDEO_ID:"):
+                    vid = line[9:].strip()
+                    if re.fullmatch(r"[\w-]{11}", vid):
+                        job.video_id = vid
+                    continue  # baris teknis, jangan tampilkan di log GUI
+                job.lines.append(line)
+                pct = parse_progress(line)
+                if pct is not None:
+                    job.percent = pct
+            code = proc.wait()
+            self.proc = None
+            if code == 0:
+                break
+            if len(format_opts) > 1:
+                job.lines.append(f"format {fmt_opt} gagal, coba best…")
         return code
 
     def _reencode_mp3_bitrate(self, job: Job, bitrate: str) -> int:
