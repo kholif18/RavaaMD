@@ -1,0 +1,11 @@
+# artefak runtime / build — jangan masuk repo
+__pycache__/
+*.pyc
+*.log
+
+# config lokal (folder terakhir) — milik mesin, bukan repo
+config.json
+
+# editor/OS
+.DS_Store
+*.swp

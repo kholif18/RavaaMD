@@ -1,0 +1,25 @@
+# ytmp3-gui — jalankan dari folder ini:
+#   MUSIC_DIR="/home/enma/Music/My Musics" docker compose up -d --build
+# Hentikan:  docker compose down
+#
+# network_mode: host + --host 0.0.0.0 = pola TERBUKTI (uji e2e 2026-11-03):
+#   * Tanpa --host, app hanya dengar di loopback container → port-publish
+#     docker biasa TIDAK sampai (bukti: connection refused) — jangan diubah
+#     ke pola "-p 8637:8637" tanpa memahami hal ini.
+#   * Dengan --host 0.0.0.0 + host network: app melayani SEMUA interface
+#     mesin → laptop/HP di LAN bisa buka http://IP-SERVER:8637 (akses cepat,
+#     tanpa Cloudflare; BUKA PORT di firewalld dulu, lihat README), dan
+#     tunnel Cloudflare (di luar rumah) tetap menunjuk http://127.0.0.1:8637.
+#   * TANPA auth — hanya untuk LAN rumah yang dipercaya; jangan publish ke
+#     internet langsung tanpa Access policy.
+services:
+  ytmp3-gui:
+    build: .
+    image: ytmp3-gui:latest
+    container_name: ytmp3-gui
+    restart: unless-stopped
+    network_mode: host
+    command: ["--folder", "/music", "--no-browser", "--host", "0.0.0.0"]
+    volumes:
+      # folder musik host → /music di container; :Z = label SELinux (Fedora)
+      - "${MUSIC_DIR:?Atur MUSIC_DIR=/path/folder/musik, contoh: MUSIC_DIR=\"$HOME/Music/My Musics\"}:/music:Z"

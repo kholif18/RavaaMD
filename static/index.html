@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ytmp3-gui</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="orb orb-1" aria-hidden="true"></div>
+  <div class="orb orb-2" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+          <path d="M9 18.5A2.5 2.5 0 1 0 11 16V6.2l7-1.7v9.5A2.5 2.5 0 1 0 16 17.5V6L9 7.7v10.8Z" fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="brand-teks">
+        <strong>ytmp3-gui</strong>
+        <small>MP3 + tag + cover — siap diputar di Amberol</small>
+      </span>
+    </div>
+    <div class="topbar-kanan">
+      <span id="status-pill" class="pill-status siap"><i></i>siap</span>
+      <button id="btn-exit" class="btn hantu" title="Matikan aplikasi">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v7M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
+        Keluar
+      </button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- ============ unduh ============ -->
+    <section class="panel" aria-labelledby="judul-unduh">
+      <div class="panel-head">
+        <span class="panel-ikon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+        </span>
+        <div class="panel-judul">
+          <h2 id="judul-unduh">Unduh</h2>
+          <p class="panel-sub">Ketik judul lagu — atau tempel URL YouTube</p>
+        </div>
+      </div>
+
+      <form id="form-unduh" class="baris-unduh" autocomplete="off">
+        <span class="input-wrap">
+          <svg class="input-ikon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="q" type="text" spellcheck="false"
+                 placeholder="contoh: Keane Somewhere Only We Know">
+        </span>
+        <button id="btn-download" class="btn utama" type="submit">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+          Unduh
+        </button>
+      </form>
+      <div class="chips" aria-hidden="true">
+        <span class="chip"><i class="dot dot-brand"></i>YouTube Music dulu</span>
+        <span class="chip"><i class="dot dot-mute"></i>fallback YouTube</span>
+        <span class="chip"><i class="dot dot-green"></i>tag terpisah + cover</span>
+      </div>
+
+      <!-- job berjalan -->
+      <div id="cur" class="job-kini" hidden>
+        <div class="job-kini-kepala">
+          <span class="spin" aria-hidden="true"></span>
+          <span id="cur-query" class="job-kini-query"></span>
+          <span id="cur-pct" class="job-kini-pct">0%</span>
+          <button id="btn-cancel" class="btn bahaya-kecil" type="button">Batal</button>
+        </div>
+        <div class="progres"><div id="cur-bar" class="progres-isi"></div></div>
+        <pre id="cur-log" class="log" aria-live="polite"></pre>
+      </div>
+
+      <!-- antrian -->
+      <div id="queue-wrap" class="blok" hidden>
+        <h3 class="label-seksi">Antrian <span id="queue-count" class="hitung"></span></h3>
+        <ul id="queue" class="baris"></ul>
+      </div>
+
+      <!-- sejarah -->
+      <div id="sejarah-wrap" class="blok" hidden>
+        <h3 class="label-seksi">Baru saja</h3>
+        <ul id="sejarah" class="baris"></ul>
+      </div>
+    </section>
+
+    <!-- ============ pustaka ============ -->
+    <section class="panel" aria-labelledby="judul-pustaka">
+      <div class="panel-head">
+        <span class="panel-ikon hijau" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18.5A2.5 2.5 0 1 0 11 16V6.2l7-1.7v9.5A2.5 2.5 0 1 0 16 17.5V6L9 7.7v10.8Z" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <div class="panel-judul">
+          <h2 id="judul-pustaka">Pustaka</h2>
+          <p class="panel-sub"><span id="lib-count">0</span> lagu di folder aktif</p>
+        </div>
+        <button id="btn-open" class="btn hantu kecil" type="button" title="Buka folder di pengelola berkas">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+          Buka folder
+        </button>
+      </div>
+
+      <div class="baris-folder">
+        <span class="input-wrap kecil">
+          <svg class="input-ikon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+          <input id="folder-input" type="text" spellcheck="false" title="Folder tujuan unduhan & pustaka">
+        </span>
+        <button id="btn-folder" class="btn hantu kecil" type="button">Simpan</button>
+      </div>
+
+      <ul id="lib" class="baris pustaka"><li class="kosong">memuat…</li></ul>
+    </section>
+  </main>
+
+  <!-- dialog konfirmasi (pengganti confirm() bawaan) -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-kotak" role="alertdialog" aria-modal="true" aria-labelledby="modal-judul">
+      <span id="modal-ikon" class="modal-ikon" aria-hidden="true">!</span>
+      <h3 id="modal-judul"></h3>
+      <p id="modal-pesan"></p>
+      <div class="modal-aksi">
+        <button id="modal-batal" class="btn hantu" type="button">Batal</button>
+        <button id="modal-ok" class="btn bahaya" type="button">Hapus</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
