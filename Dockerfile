@@ -1,4 +1,4 @@
-# ytmp3-gui — image container (docker/Podman; teruji dengan docker 29.x).
+# RavaaMD — image container (docker/Podman; teruji dengan docker 29.x).
 # Isi: python3 (stdlib saja — TANPA pip), ffmpeg, node (runtime JS yt-dlp),
 # yt-dlp terbaru. Tidak ada langkah pip/npm — resep proyek tetap offline-friendly.
 FROM python:3.14-slim
@@ -22,7 +22,7 @@ RUN mkdir -p /root/.local/bin /root/.config/yt-dlp \
     && /root/.local/bin/yt-dlp --version \
     && node --version
 
-WORKDIR /opt/ytmp3-gui
+WORKDIR /opt/ravaamd
 COPY run.py ./
 COPY app ./app
 COPY static ./static
@@ -34,6 +34,10 @@ RUN python3 tests/api-test.py
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8637
 
+# Folder kerja per-job di dalam container (hasil convert ada di sini sebentar,
+# lalu dikirim ke perangkat via /api/fetch dan dihapus).
+ENV RAVAAMD_WORK=/tmp/ravaamd-work
+
 # Server SELALU bind 127.0.0.1 di dalam container (AGENTS §5); dengan
 # network_mode: host (compose) app melayani loopback mesin — tunnel kamu
 # menunjuk http://127.0.0.1:8637. Healthcheck scan rentang fallback 8637..8657
@@ -42,5 +46,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD for p in $(seq 8637 8657); do curl -fsS -m 2 "http://127.0.0.1:$p/api/state" >/dev/null 2>&1 && exit 0; done; exit 1
 
 ENTRYPOINT ["python3", "run.py"]
-# Folder musik = volume /music (lihat compose.yaml). --no-browser wajib (headless).
-CMD ["--folder", "/music", "--no-browser"]
+# --no-browser wajib (headless). --folder tidak ada di run.py (server =
+# converter murni, tidak simpan ke folder tujuan).
+CMD ["--no-browser"]

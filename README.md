@@ -69,8 +69,8 @@ Image membawa semua yang dibutuhkan (python + ffmpeg + node + yt-dlp +
 config `--js-runtimes node` sudah dibakar) — di server cukup ada Docker:
 
 ```bash
-cd ~/Projects/ytmp3-gui
-MUSIC_DIR="$HOME/Music/My Musics" docker compose up -d --build
+cd ~/Projects/RavaaMD
+docker compose up -d --build
 # → app di http://127.0.0.1:8637  (build otomatis menjalankan suite tes)
 docker compose down            # berhenti
 ```
@@ -85,7 +85,10 @@ loopback DAN via IP LAN):
 - **Tutup GUI native dulu** sebelum `compose up` supaya container mendapat
   port 8637 (kalau sibuk, aplikasi otomatis fallback ke 8638..8657 —
   tunnel jadi menunjuk port yang salah).
-- Folder musik = variabel `MUSIC_DIR` di compose (di-mount ke `/music`).
+- Server = converter murni: tidak ada volume musik / `MUSIC_DIR`. Hasil
+  convert tinggal di `RAVAAMD_WORK` (default `/tmp/ravaamd-work` di
+  container) sebentar, lalu dikirim ke perangkat via `/api/fetch` dan
+  dihapus.
 ### Cara kerja
 
 Browser di laptop/HP hanya **remote control**: ketik lagu, klik Unduh —

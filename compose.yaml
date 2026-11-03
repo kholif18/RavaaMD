@@ -22,4 +22,6 @@ services:
     container_name: ravaamd
     restart: unless-stopped
     network_mode: host
+    environment:
+      - RAVAAMD_WORK=/tmp/ravaamd-work
     command: ["--no-browser", "--host", "0.0.0.0"]
