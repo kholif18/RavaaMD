@@ -30,6 +30,16 @@ MAKS_BODY = 10_000
 FORMAT_VALID = {"mp3", "mp4"}
 FORMAT_DEFAULT = "mp3"
 
+MP4_RESOLUSI = {"best", "1080p", "720p", "480p", "360p"}
+MP3_BITRATE = {"best", "320k", "256k", "192k", "128k"}
+QUALITY_DEFAULT = "best"
+
+
+def _quality_valid(fmt: str, quality: str) -> bool:
+    if fmt == "mp4":
+        return quality in MP4_RESOLUSI
+    return quality in MP3_BITRATE
+
 
 def _akhiran(path: str) -> str:
     return os.path.splitext(path)[1].lower()
@@ -66,9 +76,9 @@ def build_handler(ctx: Ctx) -> type:
             rel = "index.html" if url in ("/", "/index.html") else url[len("/static/"):]
             path = os.path.normpath(os.path.join(STATIC_DIR, rel))
             if not path.startswith(STATIC_DIR + os.sep) and path != STATIC_DIR:
-                return self._bad("akses path terlarang", 403)
+                return self._bad("access denied", 403)
             if not os.path.isfile(path):
-                return self._bad("file statis tidak ada", 404)
+                return self._bad("static file not found", 404)
             with open(path, "rb") as f:
                 body = f.read()
             self.send_response(200)
@@ -80,11 +90,11 @@ def build_handler(ctx: Ctx) -> type:
         def _body(self):
             n = int(self.headers.get("Content-Length") or 0)
             if n <= 0 or n > MAKS_BODY:
-                raise ValueError("payload tidak wajar")
+                raise ValueError("payload invalid")
             return json.loads(self.rfile.read(n) or b"{}")
 
         def _shutdown(self) -> None:
-            self._json(200, {"ok": True, "pesan": "server dimatikan"})
+            self._json(200, {"ok": True, "message": "server shutting down"})
             t = threading.Thread(target=(ctx.server or self.server).shutdown, daemon=True)
             t.start()
 
@@ -100,17 +110,17 @@ def build_handler(ctx: Ctx) -> type:
                 try:
                     jid = int(raw)
                 except ValueError:
-                    return self._bad("id job tidak valid")
+                    return self._bad("invalid job id")
                 path = ctx.jobs.ambil(jid)
                 if not path:
-                    return self._bad("file tidak ada (sudah terkirim atau belum selesai)",
+                    return self._bad("file not found (already sent or not yet complete)",
                                      404)
                 nama = os.path.basename(path)
                 try:
                     fh = open(path, "rb")
                     ukuran = os.path.getsize(path)
                 except OSError:
-                    return self._bad("file tidak bisa dibaca", 404)
+                    return self._bad("file cannot be read", 404)
                 with fh:
                     # filename ASCII aman + filename* UTF-8 (nama berspasi/emoji)
                     ascii_nama = nama.encode("ascii", "replace").decode().replace('"', "")
@@ -138,7 +148,7 @@ def build_handler(ctx: Ctx) -> type:
                 ctx.jobs.selesai_fetch(jid)
                 return
             if url.startswith("/api/"):
-                return self._bad("endpoint tidak ada", 404)
+                return self._bad("endpoint not found", 404)
             return self._statis(url)
 
         # ---- POST ----
@@ -152,13 +162,17 @@ def build_handler(ctx: Ctx) -> type:
             if url == "/api/download":
                 q = str(data.get("query", "")).strip()
                 if not q:
-                    return self._bad("query tidak boleh kosong")
+                    return self._bad("query cannot be empty")
                 if len(q) > 300:
-                    return self._bad("kuerian terlalu panjang (maks 300)")
+                    return self._bad("query too long (max 300)")
                 fmt = str(data.get("format", FORMAT_DEFAULT)).strip()
                 if fmt not in FORMAT_VALID:
-                    return self._bad(f"format tidak valid (pilih {', '.join(sorted(FORMAT_VALID))})")
-                job = ctx.jobs.add(q, fmt=fmt)
+                    return self._bad(f"invalid format (choose {', '.join(sorted(FORMAT_VALID))})")
+                quality = str(data.get("quality", QUALITY_DEFAULT)).strip()
+                if not _quality_valid(fmt, quality):
+                    valid = sorted(MP4_RESOLUSI) if fmt == "mp4" else sorted(MP3_BITRATE)
+                    return self._bad(f"invalid quality for {fmt} (choose {', '.join(valid)})")
+                job = ctx.jobs.add(q, fmt=fmt, quality=quality)
                 return self._json(201, {"ok": True, "job": job.to_dict(tail=1)})
 
             if url == "/api/cancel":

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -20,28 +20,28 @@
       </span>
       <span class="brand-teks">
         <strong>RavaaMD</strong>
-        <small>Ravaa Media Downloader — MP3 + tag + cover, siap diputar di Amberol</small>
+        <small>Ravaa Media Downloader — MP3 + MP4, tag + cover, ready for Amberol</small>
       </span>
     </div>
     <div class="topbar-kanan">
-      <span id="status-pill" class="pill-status siap"><i></i>siap</span>
-      <button id="btn-exit" class="btn hantu" title="Matikan aplikasi">
+      <span id="status-pill" class="pill-status siap"><i></i>idle</span>
+      <button id="btn-exit" class="btn hantu" title="Quit application">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v7M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>
-        Keluar
+        Quit
       </button>
     </div>
   </header>
 
   <main class="grid">
-    <!-- ============ unduh ============ -->
+    <!-- ============ download ============ -->
     <section class="panel" aria-labelledby="judul-unduh">
       <div class="panel-head">
         <span class="panel-ikon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
         </span>
         <div class="panel-judul">
-          <h2 id="judul-unduh">Unduh</h2>
-          <p class="panel-sub">Ketik judul lagu atau URL YouTube — pilih MP3 atau MP4, hasil otomatis terunduh ke perangkat ini</p>
+          <h2 id="judul-unduh">Download</h2>
+          <p class="panel-sub">Enter song title or YouTube URL — pick MP3 or MP4, result is sent to your device</p>
         </div>
       </div>
 
@@ -49,21 +49,28 @@
         <span class="input-wrap">
           <svg class="input-ikon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
           <input id="q" type="text" spellcheck="false"
-                 placeholder="contoh: Keane Somewhere Only We Know">
+                 placeholder="e.g. Keane Somewhere Only We Know">
         </span>
-        <div class="format-pilih" aria-label="Format unduhan">
+        <div class="format-pilih" aria-label="Download format">
           <button type="button" class="fmt-btn aktif" data-fmt="mp3">MP3</button>
           <button type="button" class="fmt-btn" data-fmt="mp4">MP4</button>
         </div>
+        <!-- kualitas: muncul berdasarkan format yang dipilih -->
+        <div class="kualitas-pilih" aria-label="Quality">
+          <label class="kualitas-label" id="kualitas-label">Quality</label>
+          <select id="kualitas" class="kualitas-select">
+            <option value="best">Best</option>
+          </select>
+        </div>
         <button id="btn-download" class="btn utama" type="submit">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
-          Unduh
+          Download
         </button>
       </form>
       <div class="chips" aria-hidden="true">
-        <span class="chip"><i class="dot dot-brand"></i>YouTube Music dulu</span>
-        <span class="chip"><i class="dot dot-mute"></i>fallback YouTube</span>
-        <span class="chip"><i class="dot dot-green"></i>tag + cover → ke perangkat</span>
+        <span class="chip"><i class="dot dot-brand"></i>YouTube Music first</span>
+        <span class="chip"><i class="dot dot-mute"></i>YouTube fallback</span>
+        <span class="chip"><i class="dot dot-green"></i>tag + cover → to device</span>
       </div>
 
       <!-- job berjalan -->
@@ -72,7 +79,7 @@
           <span class="spin" aria-hidden="true"></span>
           <span id="cur-query" class="job-kini-query"></span>
           <span id="cur-pct" class="job-kini-pct">0%</span>
-          <button id="btn-cancel" class="btn bahaya-kecil" type="button">Batal</button>
+          <button id="btn-cancel" class="btn bahaya-kecil" type="button">Cancel</button>
         </div>
         <div class="progres"><div id="cur-bar" class="progres-isi"></div></div>
         <pre id="cur-log" class="log" aria-live="polite"></pre>
@@ -80,13 +87,13 @@
 
       <!-- antrian -->
       <div id="queue-wrap" class="blok" hidden>
-        <h3 class="label-seksi">Antrian <span id="queue-count" class="hitung"></span></h3>
+        <h3 class="label-seksi">Queue <span id="queue-count" class="hitung"></span></h3>
         <ul id="queue" class="baris"></ul>
       </div>
 
       <!-- sejarah -->
       <div id="sejarah-wrap" class="blok" hidden>
-        <h3 class="label-seksi">Baru saja</h3>
+        <h3 class="label-seksi">Recent</h3>
         <ul id="sejarah" class="baris"></ul>
       </div>
     </section>
@@ -99,8 +106,8 @@
       <h3 id="modal-judul"></h3>
       <p id="modal-pesan"></p>
       <div class="modal-aksi">
-        <button id="modal-batal" class="btn hantu" type="button">Batal</button>
-        <button id="modal-ok" class="btn bahaya" type="button">Hapus</button>
+        <button id="modal-batal" class="btn hantu" type="button">Cancel</button>
+        <button id="modal-ok" class="btn bahaya" type="button">OK</button>
       </div>
     </div>
   </div>

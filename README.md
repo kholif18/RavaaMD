@@ -1,94 +1,90 @@
 # RavaaMD
 
-Aplikasi pribadi untuk mengunduh lagu/video dari YouTube sebagai **MP3 atau
-MP4**, **lengkap dengan tag judul-artis + sampul tertanam** — jadi Amberol
-(atau player lain) langsung menampilkan lagu dengan benar, tanpa pakai CLI dan
-tanpa situs downloader penuh iklan.
+Personal app to download songs/videos from YouTube as **MP3 or MP4**,
+**with embedded title-artist tags + cover art** — so Amberol (or any player)
+shows tracks correctly, without CLI and without ad-filled downloader sites.
 
 *RavaaMD = **R**avaa **M**edia **D**ownloader.*
 
 
-MP3 (default) diunduh dengan resep terkunci:
+MP3 (default) is downloaded with the locked recipe:
 
 ```
 -x --audio-format mp3 --audio-quality 0 --embed-metadata --embed-thumbnail --no-playlist
 ```
 
-MP4 diunduh tanpa ekstraksi audio (`-f best --merge-output-format mp4`)
-agar video + audio tetap utuh dalam container MP4, juga dengan metadata dan
-thumbnail tertanam.
+MP4 is downloaded without audio extraction (`-f best --merge-output-format mp4`)
+so video + audio stay intact in the MP4 container, also with embedded metadata
+and thumbnail.
 
-## Cara pakai
+## How to use
 
-**Tombol launcher (paling gampang)** — setelah `bash install.sh` dijalankan
-sekali, tekan tombol *Activities* di GNOME dan cari **RavaaMD** (ikon nota
-biru-teal), lalu Enter.
+**Launcher button (easiest)** — after running `bash install.sh` once, open
+*Activities* in GNOME and search for **RavaaMD** (blue-teal note icon), then Enter.
 
-**Dari terminal**:
+**From terminal**:
 
 ```bash
 python3 ~/Projects/ytmp3-gui/run.py
 ```
 
-lalu membuka `http://127.0.0.1:8637` di browser default. Mau sekalian
-dengar di LAN (akses dari laptop/HP lain via IP, tanpa auth):
-`python3 run.py --host0.0.0.0` — lihat bagian Deploy.
+then open `http://127.0.0.1:8637` in your default browser. To also listen on
+LAN (from laptop/phone via IP, no auth):
+`python3 run.py --host0.0.0.0` — see Deploy section.
 
-Di dalam GUI:
+In the GUI:
 
-1. Ketik nama lagu (contoh: `Keane Somewhere Only We Know`) **atau** tempel
-   URL YouTube. Pilih **MP3** (default) atau **MP4** dengan tombol toggle di
-   samping kotak masukan, lalu klik **Unduh** (atau Enter). Pencarian otomatis
-   mencoba **YouTube Music dulu** (trek resmi katalog) — kalau tidak ketemu,
-   jatuh ke pencarian YouTube biasa.
-2. Bar progres + log menunjukkan jalannya unduhan; beberapa unduhan
-   diantri satu per satu (MP3 dan MP4 dalam antrian yang sama).
-3. **Tag dipisah otomatis** setelah unduhan: judul masuk kolom *title*,
-   artis masuk kolom *artist* (mis. `Sugar` / `Maroon 5`) — jadi Amberol
-   menampilkan lagu dengan rapi, bukan satu gumpal "Artis - Judul (...)".
-   Berlaku baik untuk MP3 maupun MP4.
-4. Daftar **Pustaka** di kanan adalah isi folder musik yang aktif — tombol
-   **Buka folder** membukanya di pengelola berkas (Nautilus).
-5. Ganti folder tujuan lewat kotak **folder** lalu **Simpan** (disimpan
-   otomatis untuk peluncuran berikutnya).
-6. Selesai memakai? Klik **Keluar** untuk mematikan aplikasinya sungguhan.
+1. Type song title (e.g. `Keane Somewhere Only We Know`) **or** paste a
+   YouTube URL. Choose **MP3** (default) or **MP4** with the toggle buttons
+   next to the input box, then click **Download** (or Enter). Automatic search
+   tries **YouTube Music first** for MP3 (audio-focused catalog), **YouTube
+   first** for MP4 (video), falling back to the other if not found.
+2. Progress bar + log show download progress; multiple downloads queue one at a
+   time (MP3 and MP4 share the same queue).
+3. **Choose quality before downloading:**
+   * MP4 resolution: Best / 1080p / 720p / 480p / 360p (like y2mate)
+   * MP3 bitrate: Best / 320k / 256k / 192k / 128k
+4. **Tags are split automatically** after download: title goes to *title*,
+   artist to *artist* (e.g. `Sugar` / `Maroon 5`) — so Amberol shows tracks
+   neatly, not one clump like "Artist - Title (...)". Applies to both MP3
+   and MP4.
+5. Done? Click **Quit** to shut down the application properly.
 
-## Syarat
+## Requirements
 
-- Python 3 (stdlib saja — tidak perlu pip)
-- `yt-dlp` di `~/.local/bin/yt-dlp` + `~/.config/yt-dlp/config` berisi
-  `--js-runtimes node` (ekstraksi YouTube 2026)
-- `ffmpeg`/`ffprobe` di PATH
-- Node v22 (runtime JS untuk yt-dlp)
+- Python 3 (stdlib only — no pip needed)
+- `yt-dlp` at `~/.local/bin/yt-dlp` + `~/.config/yt-dlp/config` containing
+  `--js-runtimes node` (YouTube 2026 extraction)
+- `ffmpeg`/`ffprobe` in PATH
+- Node v22 (JS runtime for yt-dlp)
 
-Jika unduhan mendadak gagal semua: `yt-dlp -U`.
+If downloads suddenly all fail: `yt-dlp -U`.
 
-## Deploy di home server (Docker)
+## Deploy on home server (Docker)
 
-Image membawa semua yang dibutuhkan (python + ffmpeg + node + yt-dlp +
-config `--js-runtimes node` sudah dibakar) — di server cukup ada Docker:
+Image includes everything needed (python + ffmpeg + node + yt-dlp +
+`--js-runtimes node` config pre-baked) — on the server, just need Docker:
 
 ```bash
 cd ~/Projects/RavaaMD
 docker compose up -d --build
-# → app di http://127.0.0.1:8637  (build otomatis menjalankan suite tes)
-docker compose down            # berhenti
+# → app at http://127.0.0.1:8637  (build automatically runs test suite)
+docker compose down            # stop
 ```
 
-Catatan penting (sudah teruji e2e — unduhan nyata lewat container via
-loopback DAN via IP LAN):
+Important notes (tested e2e — real downloads via container over loopback AND
+LAN IP):
 
-- Compose memakai `network_mode: host` + `--host 0.0.0.0`. Tanpa keduanya,
-  port-publish docker biasa (`"8637:8637"`) **TIDAK akan sampai** karena
-  app hanya mendengar di loopback container — pola ini sudah teruji,
-  jangan diubah ke port-publish biasa.
-- **Tutup GUI native dulu** sebelum `compose up` supaya container mendapat
-  port 8637 (kalau sibuk, aplikasi otomatis fallback ke 8638..8657 —
-  tunnel jadi menunjuk port yang salah).
-- Server = converter murni: tidak ada volume musik / `MUSIC_DIR`. Hasil
-  convert tinggal di `RAVAAMD_WORK` (default `/tmp/ravaamd-work` di
-  container) sebentar, lalu dikirim ke perangkat via `/api/fetch` dan
-  dihapus.
+- Compose uses `network_mode: host` + `--host 0.0.0.0`. Without both, regular
+  Docker port-publish (`"8637:8637"`) **will not work** because the app only
+  listens on loopback inside the container — this pattern is tested, do not
+  change to regular port-publish.
+- **Close the native GUI first** before `compose up` so the container gets
+  port 8637 (if busy, app auto-falls back to 8638..8657 — tunnel would point
+  to the wrong port).
+- Server = pure converter: no music volume / `MUSIC_DIR`. Convert results stay
+  in `RAVAAMD_WORK` (default `/tmp/ravaamd-work` in container) briefly, then
+  are sent to the device via `/api/fetch` and deleted.
 ### Cara kerja
 
 Browser di laptop/HP hanya **remote control**: ketik lagu, klik Unduh —

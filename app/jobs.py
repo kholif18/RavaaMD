@@ -8,12 +8,13 @@ dan job keluar dari history (overflow).
 
 Invarian yang dijaga (lihat AGENTS.md §5):
   * HANYA satu process yt-dlp jalan bersamaan; job berikutnya menunggu.
-  * Selalu `-x --audio-format mp3 --audio-quality 0 --embed-metadata
-    --embed-thumbnail --no-playlist` supaya hasilnya punya tag + cover —
-    itulah satu-satunya alasan proyek ini ada (Amberol tidak membaca nama file).
   * Argumen URL dipindah lewat argv list (bukan command string), jadi
     judul dengan apostrof/quote/emoji apa pun aman dari shell injection.
   * Gagal = job.status "error" + exitcode; TIDAK PERNAH melempar ke caller.
+
+Pencarian per format (keputusan user):
+  * MP3: YouTube Music dulu (audio terfokus), lalu fallback YouTube biasa.
+  * MP4: YouTube biasa dulu (video), lalu fallback YouTube Music.
 
 Modul tetangga (dipisah supaya file ini mudah dirawat — jangan digabung lagi):
   * app/ytm.py    — cari_ytm(): pencarian katalog YouTube Music (InnerTube).
@@ -44,6 +45,11 @@ LOG_MAXLEN = 500  # baris nyata disimpan per job (deque)
 FORMAT_VALID = {"mp3", "mp4"}
 FORMAT_DEFAULT = "mp3"
 
+# Pilihan kualitas per format (diterima dari UI / API)
+MP4_RESOLUSI = {"best", "1080p", "720p", "480p", "360p"}
+MP3_BITRATE = {"best", "320k", "256k", "192k", "128k"}
+QUALITY_DEFAULT = "best"
+
 
 def parse_progress(line: str):
     """Angka persen dari baris progres yt-dlp; None bila baris lainnya."""
@@ -55,12 +61,14 @@ class Job:
     _seq = 0
     _seq_lock = threading.Lock()
 
-    def __init__(self, query: str, fmt: str = FORMAT_DEFAULT):
+    def __init__(self, query: str, fmt: str = FORMAT_DEFAULT,
+                 quality: str = QUALITY_DEFAULT):
         with Job._seq_lock:
             Job._seq += 1
             self.id = Job._seq
         self.query = query.strip()
         self.format = fmt if fmt in FORMAT_VALID else FORMAT_DEFAULT
+        self.quality = quality if self._quality_valid(quality) else QUALITY_DEFAULT
         self.status = "pending"  # pending | running | done | error | canceled
         self.percent = None
         self.lines: deque[str] = deque(maxlen=LOG_MAXLEN)
@@ -71,11 +79,17 @@ class Job:
         self.started = None
         self.ended = None
 
+    def _quality_valid(self, quality: str) -> bool:
+        if self.format == "mp4":
+            return quality in MP4_RESOLUSI
+        return quality in MP3_BITRATE
+
     def to_dict(self, tail: int = 25) -> dict:
         return {
             "id": self.id,
             "query": self.query,
             "format": self.format,
+            "quality": self.quality,
             "status": self.status,
             "percent": self.percent,
             "exitcode": self.exitcode,
@@ -146,10 +160,11 @@ class JobManager:
             shutil.rmtree(d, ignore_errors=True)
 
     # ---- API dipanggil handler HTTP ----
-    def add(self, query: str, fmt: str = FORMAT_DEFAULT) -> Job:
+    def add(self, query: str, fmt: str = FORMAT_DEFAULT,
+            quality: str = QUALITY_DEFAULT) -> Job:
         if fmt not in FORMAT_VALID:
             fmt = FORMAT_DEFAULT
-        job = Job(query, fmt=fmt)
+        job = Job(query, fmt=fmt, quality=quality)
         with self.lock:
             self.queue.append(job)
         self.on_state_change()
@@ -166,7 +181,7 @@ class JobManager:
         except OSError:
             pass
         if job:
-            job.lines.append("== dibatalkan user ==")
+            job.lines.append("== canceled by user ==")
         return True
 
     def state(self) -> dict:
@@ -204,23 +219,35 @@ class JobManager:
         hint = None
         kandidat_urls = []
         if job.query.startswith(("http://", "https://")):
-            kandidat_urls.append(job.query)  # URL eksplisit: apa adanya
+            # URL eksplisit: gunakan apa adanya (baik mp3 maupun mp4)
+            kandidat_urls.append(job.query)
+        elif job.format == "mp4":
+            # MP4: YouTube dulu (video), fallback YouTube Music
+            kandidat_urls.append("ytsearch1:" + job.query)
+            hint = cari_ytm(job.query)
+            if hint:
+                kandidat_urls.append(f"https://www.youtube.com/watch?v={hint['video_id']}")
+                job.lines.append(f"YTM: {hint['judul']} — {hint['artis'] or '?'} "
+                                 f"({hint['tipe']})")
         else:
-            job.lines.append("cari di YouTube Music…")
+            # MP3: YouTube Music dulu (audio), fallback YouTube biasa
+            job.lines.append("searching YouTube Music…")
             hint = cari_ytm(job.query)
             if hint:
                 kandidat_urls.append(f"https://www.youtube.com/watch?v={hint['video_id']}")
                 job.lines.append(f"YTM: {hint['judul']} — {hint['artis'] or '?'} "
                                  f"({hint['tipe']})")
             else:
-                job.lines.append("YTM kosong → fallback YouTube biasa")
-            kandidat_urls.append("ytsearch1:" + job.query)  # cadangan / pencarian biasa
+                job.lines.append("YTM empty → fallback YouTube")
+            kandidat_urls.append("ytsearch1:" + job.query)
         code = 1
         for i, url in enumerate(kandidat_urls):
+            if self._cancel:
+                break  # dibatalkan user — hentikan segera, jangan coba URL berikutnya
             if i > 0:
-                job.lines.append("coba ulang via pencarian YouTube biasa…")
+                job.lines.append("retry via regular YouTube search…")
             sebelum = set(os.listdir(job.dir))
-            code = self._jalankan_ytdlp(job, url, job.format)
+            code = self._jalankan_ytdlp(job, url, job.format, job.quality)
             if code == 0:
                 break
         job.exitcode = code
@@ -235,25 +262,40 @@ class JobManager:
                 newest = max(baru, key=lambda f: os.path.getmtime(os.path.join(job.dir, f)))
                 job.file = os.path.join(job.dir, newest)
             if job.file:
-                self._retag_terpisah(job, hint)
+                # MP3 dengan bitrate spesifik → re-encode lewat ffmpeg
+                if job.format == "mp3" and job.quality != "best":
+                    code = self._reencode_mp3_bitrate(job, job.quality)
+                    if code != 0:
+                        job.lines.append("bitrate re-encode skipped due to error")
+                self._retag_terpisah(job, hint, job.quality)
                 job.percent = 100.0
             else:
-                job.lines.append("yt-dlp sukses tapi mp3 tidak ditemukan")
+                job.lines.append("yt-dlp succeeded but output file not found")
         self._finish(job, error=(code != 0 or not job.file))
 
-    def _jalankan_ytdlp(self, job: Job, url: str, fmt: str) -> int:
+    def _jalankan_ytdlp(self, job: Job, url: str, fmt: str,
+                        quality: str) -> int:
         """Jalankan yt-dlp untuk SATU url; kembalikan exit code (bukan lempar).
 
-        Resep MP3 (terkunci, tidak diubah):
+        MP3 (resep terkunci, -x dipertahankan):
           -x --audio-format mp3 --audio-quality 0 --embed-metadata
           --embed-thumbnail --no-playlist
-        Resep MP4 (baru, tanpa -x):
-          -f best --merge-output-format mp4 --embed-metadata
-          --embed-thumbnail --no-playlist
+          Bitrate spesifik → setelah unduhan, ffmpeg re-encode ke -b:a <bitrate>.
+
+        MP4 (tanpa -x):
+          best      → -f best --merge-output-format mp4
+          1080p/720p/480p/360p → -f "bestvideo[height<=N]+bestaudio/best[height<=N]"
+                              --merge-output-format mp4
         """
         if fmt == "mp4":
+            if quality == "best":
+                fmt_opt = "best"
+            else:
+                h = quality.rstrip("p")
+                fmt_opt = (f"bestvideo[height<={h}]+bestaudio/"
+                           f"best[height<={h}]")
             cmd = [
-                YT_DLP, "-f", "best", "--merge-output-format", "mp4",
+                YT_DLP, "-f", fmt_opt, "--merge-output-format", "mp4",
                 "--embed-metadata", "--embed-thumbnail", "--no-playlist",
                 "--newline",  # tiap update progres = 1 baris (bukan \r) supaya GUI bisa mem-parse
                 "--print", "after_move:VIDEO_ID:%(id)s",  # id video → jaring pengaman cover
@@ -279,7 +321,7 @@ class JobManager:
                 text=True, errors="replace", bufsize=1,
             )
         except OSError as e:
-            job.lines.append(f"tolak jalankan yt-dlp: {e}")
+            job.lines.append(f"failed to start yt-dlp: {e}")
             return -1
         with self.lock:
             self.proc = proc
@@ -301,7 +343,35 @@ class JobManager:
         self.proc = None
         return code
 
-    def _retag_terpisah(self, job: Job, hint: dict | None) -> None:
+    def _reencode_mp3_bitrate(self, job: Job, bitrate: str) -> int:
+        """Re-encode mp3 hasil unduhan ke bitrate target lewat ffmpeg."""
+        f = job.file
+        if not f or not os.path.isfile(f):
+            return -1
+        tmp = f + f".{bitrate}.mp3"
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", f, "-vn", "-c:a", "libmp3lame", "-b:a", bitrate,
+            "-id3v2_version", "3", tmp,
+        ]
+        job.lines.append(f"re-encode mp3 to {bitrate}…")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if p.returncode != 0 or not os.path.isfile(tmp):
+                raise RuntimeError(p.stderr.strip()[:200] or "ffmpeg gagal")
+            os.replace(tmp, f)
+            job.lines.append(f"bitrate {bitrate} applied ✓")
+            return 0
+        except (OSError, RuntimeError) as e:
+            job.lines.append(f"re-encode gagal: {e}")
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return -1
+
+    def _retag_terpisah(self, job: Job, hint: dict | None,
+                        quality: str = QUALITY_DEFAULT) -> None:
         """Tulis ulang tag judul/artis TERPISAH setelah unduhan selesai.
 
         yt-dlp menulis judul mentah 'Artis - Judul (Official ...)' ke tag —
@@ -320,8 +390,8 @@ class JobManager:
         sekarang_title, sekarang_artist = baca_tag(f)
         raw = os.path.basename(f)
         ekst = os.path.splitext(raw)[1].lower()
-        if ekst == ".mp3":
-            raw = raw[:-4]
+        if ekst in (".mp3", ".mp4"):
+            raw = raw[: -len(ekst)]
         if hint and hint.get("judul"):
             judul = bersih_judul(hint["judul"],
                                  artis=hint.get("artis") or sekarang_artist)
@@ -333,7 +403,7 @@ class JobManager:
         judul = judul or sekarang_title
         artis = artis or sekarang_artist
         if judul == sekarang_title and artis == sekarang_artist:
-            job.lines.append(f"tag OK: judul={judul!r} artis={artis!r}")
+            job.lines.append(f"tag OK: title={judul!r} artist={artis!r}")
         else:
             if ekst == ".mp4":
                 tmp = f + ".retag.mp4"
@@ -359,27 +429,27 @@ class JobManager:
             try:
                 p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if p.returncode != 0 or not os.path.isfile(tmp):
-                    raise RuntimeError(p.stderr.strip()[:200] or "ffmpeg gagal")
+                    raise RuntimeError(p.stderr.strip()[:200] or "ffmpeg failed")
                 os.replace(tmp, f)
             except (OSError, RuntimeError) as e:
-                job.lines.append(f"retag gagal: {e}")
+                job.lines.append(f"retag failed: {e}")
                 try:
                     os.unlink(tmp)
                 except OSError:
                     pass
                 return
             t2, a2 = baca_tag(f)
-            job.lines.append(f"tag OK: judul={t2!r} artis={a2!r}")
+            job.lines.append(f"tag OK: title={t2!r} artist={a2!r}")
         # jaring pengaman cover (HANYA mp3): untuk mp4, ada_sampul() akan
         # selalu positif karena stream video utama ikut terdeteksi — jangan
         # pakai sebagai penanda cover.
         if job.format == "mp3" and not ada_sampul(f) and job.video_id:
-            job.lines.append(f"cover tidak ada → tarik thumbnail {job.video_id}…")
+            job.lines.append(f"cover missing → fetching thumbnail {job.video_id}…")
             jpg = unduh_sampul(job.video_id)
             if jpg:
                 self._pasang_sampul(job, f, jpg)
             else:
-                job.lines.append("cover tidak tersedia (unduhan thumbnail gagal)")
+                job.lines.append("cover unavailable (thumbnail download failed)")
 
     def _pasang_sampul(self, job: Job, path: str, jpg: bytes) -> None:
         """Sematkan JPEG cover ke mp3 (remux -c copy; tag lain ikut utuh)."""

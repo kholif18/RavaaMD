@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Uji API + siklus job RavaaMD (unittest stdlib, tanpa jaringan panggilan nyata
-YouTube — unduhan NYATA diuji terpisah, lihat AGENTS.md §7).
+"""API + job cycle tests for RavaaMD (unittest stdlib, no real YouTube calls —
+real downloads tested separately, see AGENTS.md §7).
 
-Jalankan: python3 tests/api-test.py
-Menyalakan run.py dengan env RAVAAMD_FAKE=1 supaya siklus job berjalan tanpa yt-dlp.
+Run: python3 tests/api-test.py
+Starts run.py with env RAVAAMD_FAKE=1 so job cycles run without yt-dlp.
 """
 import json
 import os
@@ -102,7 +102,7 @@ class TestApi(unittest.TestCase):
     def test_01_index_html(self):
         status, html, _ = self._html()
         self.assertEqual(status, 200)
-        self.assertIn("Unduh", html)
+        self.assertIn("Download", html)
 
     def _html(self):
         with urllib.request.urlopen(_url(self.port, "/"), timeout=5) as r:
@@ -129,17 +129,55 @@ class TestApi(unittest.TestCase):
         status, r = _post(self.port, "/api/download", {"query": "uji lagu", "format": "mkv"})
         self.assertEqual(status, 400)
         self.assertIn("error", r)
-        # format default (mp3) masih diterima bila tidak disertakan (cek hanya response, tidak menambahkan job yang menunggu)
+        # default format (mp3) accepted when omitted
         status, r = _post(self.port, "/api/download", {"query": "uji lagu"})
         self.assertEqual(status, 201)
         self.assertEqual(r["job"]["format"], "mp3")
-        # hapus job yang baru saja dibuat (fetch untuk membersihkan folder kerja)
+        self.assertEqual(r["job"]["quality"], "best")
+        # clean up the job just created (fetch to clear work folder)
         jid = r["job"]["id"]
         for _ in range(60):
             time.sleep(0.2)
             _, st = _get(self.port, "/api/state")
             if st["current"] is None and st["history"]:
                 break
+        _get_bin(self.port, f"/api/fetch?id={jid}")
+
+    def _tunggu_selesai(self, jid):
+        """Tunggu job dengan id jid selesai (maks 10 detik)."""
+        for _ in range(50):
+            time.sleep(0.2)
+            job = self._cari_job(jid)
+            if job and job["status"] in ("done", "error", "canceled"):
+                return job
+        return None
+
+    def test_03c_quality_tidak_valid_ditolak(self):
+        # invalid mp3 bitrate
+        status, r = _post(self.port, "/api/download", {"query": "uji lagu", "format": "mp3", "quality": "64k"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", r)
+        # invalid mp4 resolution
+        status, r = _post(self.port, "/api/download", {"query": "uji video", "format": "mp4", "quality": "4k"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", r)
+        # valid mp3 bitrate accepted
+        status, r = _post(self.port, "/api/download", {"query": "uji lagu", "format": "mp3", "quality": "192k"})
+        self.assertEqual(status, 201)
+        self.assertEqual(r["job"]["quality"], "192k")
+        jid = r["job"]["id"]
+        job = self._tunggu_selesai(jid)
+        self.assertIsNotNone(job, "job mp3 192k tidak selesai")
+        self.assertEqual(job["status"], "done")
+        _get_bin(self.port, f"/api/fetch?id={jid}")
+        # valid mp4 resolution accepted
+        status, r = _post(self.port, "/api/download", {"query": "uji video", "format": "mp4", "quality": "720p"})
+        self.assertEqual(status, 201)
+        self.assertEqual(r["job"]["quality"], "720p")
+        jid = r["job"]["id"]
+        job = self._tunggu_selesai(jid)
+        self.assertIsNotNone(job, "job mp4 720p tidak selesai")
+        self.assertEqual(job["status"], "done")
         _get_bin(self.port, f"/api/fetch?id={jid}")
 
     def test_04_fetch_id_invalid_ditolak(self):
