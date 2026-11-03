@@ -3,11 +3,15 @@
 # yt-dlp terbaru. Tidak ada langkah pip/npm — resep proyek tetap offline-friendly.
 FROM python:3.14-slim
 
-# nodejs WAJIB: tanpa `--js-runtimes node` ekstraksi YouTube 2026 gagal
-# (lihat AGENTS.md §2). ffmpeg = -x + embed metadata/thumbnail + ffprobe.
+# nodejs WAJIB (v22+): sistem EJS yt-dlp 2026 menandai node 20 (Debian repo)
+# sebagai "unsupported" → ekstraksi YouTube lambat/format hilang.
+# ffmpeg = -x + embed metadata/thumbnail + ffprobe.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ffmpeg nodejs ca-certificates curl \
+        ffmpeg ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # yt-dlp di lokasi yang DIBACA default run.py (~/.local/bin/yt-dlp).
