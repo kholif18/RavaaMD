@@ -255,21 +255,22 @@ async function tarikHasil(job) {
 }
 
 function tarikSelesai() {
-  if (!state) return;
-  for (const job of state.history || []) {
-    if (job.status !== "done" || !job.file) continue;
-    if (!minta.has(job.id) || sudah.has(job.id) || sedang.has(job.id)) continue;
-    tarikHasil(job);
-  }
+  // Auto-download from setInterval is blocked by browsers (not a user gesture).
+  // Users click the manual Download button next to completed jobs instead.
+  // Kept as no-op; download happens via unduhSekarang() on button click.
 }
 
-/* ---- manual download for completed job ---- */
+/* ---- manual download for completed job (user gesture → allowed) ---- */
 async function unduhSekarang(jid) {
   if (!state) return;
   const job = [...(state.history || []), ...(state.queue || []), state.current]
     .find(j => j && j.id === jid);
   if (!job || !job.file) return;
-  await tarikHasil(job);
+  // window.location.href triggered by user gesture → browser allows download
+  window.location.href = "/api/fetch?id=" + jid;
+  sudah.add(jid);
+  simpanSet(K_SUDAH, sudah);
+  toast(`"${job.file}" downloading...`, "sukses");
 }
 
 /* ---- download: show info box then call API ---- */
