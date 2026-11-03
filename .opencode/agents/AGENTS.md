@@ -236,6 +236,8 @@ docker compose down                # hentikan container
 docker build -t ytmp3-gui .        # build saja (gate: suite tes jalan di dalam)
 # upgrade downloader bila unduhan mendadak gagal semua:
 yt-dlp -U
+# git (repo publik, init 2026-11-03): remote git@github.com:kholif18/RavaaMD.git
+git push                        # branch main; commit dulu dengan pesan jelas
 ```
 
 Port: 8637 default (fallback +1 s/d +20). DILARANG pindah default tanpa
