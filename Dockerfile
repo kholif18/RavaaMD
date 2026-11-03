@@ -32,6 +32,9 @@ COPY tests ./tests
 RUN python3 tests/api-test.py
 
 ENV PYTHONUNBUFFERED=1
+# yt-dlp diinstal di /root/.local/bin — tambah ke PATH supaya perintah
+# `yt-dlp` bisa dipanggil tanpa path penuh (bila container di-exec manual).
+ENV PATH="/root/.local/bin:$PATH"
 EXPOSE 8637
 
 # Folder kerja per-job di dalam container (hasil convert ada di sini sebentar,
