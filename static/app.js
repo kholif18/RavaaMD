@@ -155,7 +155,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
 
   // folder tujuan hasil unduhan
-  $("btn-folder").addEventListener("click", async () => {
+  async function simpanFolder() {
     const f = $("folder-input").value.trim();
     const r = await api("/api/folder", { folder: f });
     if (r.error) toast(r.error, "error");
@@ -163,6 +163,15 @@ window.addEventListener("DOMContentLoaded", () => {
       toast("Save folder updated", "sukses");
       $("folder-input").value = r.folder;
     }
+  }
+  $("btn-folder").addEventListener("click", simpanFolder);
+  // simpan otomatis saat user selesai mengedit (blur dengan nilai berubah)
+  $("folder-input").addEventListener("change", () => {
+    if ($("folder-input").value.trim()) simpanFolder();
+  });
+  // Enter = simpan, bukan submit form (form-unduh memicu unduhan)
+  $("folder-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); simpanFolder(); }
   });
   $("btn-open").addEventListener("click", async () => {
     const r = await api("/api/open-folder");
