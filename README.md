@@ -57,11 +57,16 @@ In the GUI:
 
 ## Requirements
 
+**`./install.sh` does it all** — checks and automatically installs
+everything on any distro with `pacman` / `dnf` / `apt` / `zypper` / `apk`:
+
 - Python 3 (stdlib only — no pip needed)
-- `yt-dlp` at `~/.local/bin/yt-dlp` + `~/.config/yt-dlp/config` containing
-  `--js-runtimes node` (YouTube 2026 extraction)
 - `ffmpeg`/`ffprobe` in PATH
-- Node v22 (JS runtime for yt-dlp)
+- Node v22+ (JS runtime for yt-dlp's 2026 YouTube extraction)
+- `yt-dlp` — placed/symlinked at `~/.local/bin/yt-dlp`; if no distro package
+  exists, the official static binary is downloaded automatically
+- `~/.config/yt-dlp/config` with `--js-runtimes node` — created/appended
+  automatically (without it YouTube extraction fails)
 
 If downloads suddenly all fail: `yt-dlp -U`.
 

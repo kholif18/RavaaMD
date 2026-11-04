@@ -114,9 +114,15 @@ static/app.js          Polling /api/state tiap 800 ms → render ulang penuh;
                        ada onclick inline; esc() WAJIB dipakai untuk semua
                        teks user/YT yang dirender.
 icon.svg               Ikon nota biru-teal untuk .desktop.
-install.sh             Pasangkan launcher ~/.local/bin/ravaamd + ikon
-                       hicolor + entri ~/.local/share/applications/
-                       ravaamd.desktop (tanpa sudo, AMAN dijalankan ulang).
+install.sh             Installer lintas distro (idempoten, AMAN dijalankan
+                       ulang): deteksi PM (pacman|dnf|apt|zypper|apk) → pasang
+                       python3/ffmpeg/node bila hilang (butuh sudo utk paket);
+                       yt-dlp: pakai ~/.local/bin/yt-dlp, symlink bila biner di
+                       tempat lain, fallback unduh biner statis GitHub;
+                       bikin config `--js-runtimes node` (append bila config
+                       lama belum punya); baru daftar launcher
+                       ~/.local/bin/ravaamd + ikon hicolor + entri
+                       ravaamd.desktop. Exit 1 bila ada dependensi gagal.
 tests/api-test.py      unittest stdlib; menyalakan run.py dengan
                        RAVAAMD_FAKE=1 + --folder & RAVAAMD_CONFIG_DIR
                        terisolasi (tempfile) di port bebas ACAK; 11 kasus
@@ -212,7 +218,7 @@ python3 run.py --no-browser --print-port
 python3 run.py --host 0.0.0.0 --no-browser   # dengar di LAN juga (tanpa auth, §5)
 python3 run.py --folder /tmp/opencode/gui-test --no-browser --print-port   # paksa folder tujuan hasil unduhan
 python3 tests/api-test.py          # unittest, env RAVAAMD_FAKE=1 otomatis, tanpa jaringan
-bash install.sh                    # pasang launcher + .desktop + ikon (idempoten)
+bash install.sh                    # cek+pasang dependensi (PM terdeteksi) + launcher + .desktop + ikon (idempoten)
 ~/.local/bin/ravaamd             # launcher GUI (setelah install.sh)
 # upgrade downloader bila unduhan mendadak gagal semua:
 yt-dlp -U
