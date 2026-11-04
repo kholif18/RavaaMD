@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>RavaaMD</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
   <div class="orb orb-1" aria-hidden="true"></div>
@@ -46,30 +46,37 @@
       </div>
 
       <form id="form-unduh" class="baris-unduh" autocomplete="off">
-        <span class="input-wrap">
-          <svg class="input-ikon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          <input id="q" type="text" spellcheck="false"
-                 placeholder="e.g. Keane Somewhere Only We Know">
-        </span>
-        <div class="format-pilih" aria-label="Format">
-          <button type="button" class="fmt-btn aktif" data-fmt="mp3">MP3</button>
-          <button type="button" class="fmt-btn" data-fmt="mp4">MP4</button>
+        <!-- baris aksi: input + tombol Download -->
+        <div class="baris-utama">
+          <span class="input-wrap">
+            <svg class="input-ikon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="text" spellcheck="false"
+                   placeholder="e.g. Keane Somewhere Only We Know">
+          </span>
+          <button id="btn-download" class="btn utama" type="submit">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+            Download
+          </button>
         </div>
-        <!-- resolusi: hanya untuk MP4 -->
-        <div class="kualitas-pilih" id="kualitas-wrap" hidden>
-          <label class="kualitas-label" for="kualitas">Resolution</label>
-          <select id="kualitas" class="kualitas-select">
-            <option value="720p" selected>720p</option>
-            <option value="1080p">1080p</option>
-            <option value="480p">480p</option>
-            <option value="360p">360p</option>
-            <option value="best">Best</option>
-          </select>
+        <!-- baris opsi: format + resolusi (MP4) — terpisah supaya select
+             resolusi yang muncul TIDAK menekan tombol MP3/MP4 -->
+        <div class="baris-opsi">
+          <div class="format-pilih" aria-label="Format">
+            <button type="button" class="fmt-btn aktif" data-fmt="mp3">MP3</button>
+            <button type="button" class="fmt-btn" data-fmt="mp4">MP4</button>
+          </div>
+          <!-- resolusi: hanya untuk MP4 -->
+          <div class="kualitas-pilih" id="kualitas-wrap" hidden>
+            <label class="kualitas-label" for="kualitas">Resolution</label>
+            <select id="kualitas" class="kualitas-select">
+              <option value="720p" selected>720p</option>
+              <option value="1080p">1080p</option>
+              <option value="480p">480p</option>
+              <option value="360p">360p</option>
+              <option value="best">Best</option>
+            </select>
+          </div>
         </div>
-        <button id="btn-download" class="btn utama" type="submit">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
-          Download
-        </button>
       </form>
       <div class="chips" aria-hidden="true">
         <span class="chip"><i class="dot dot-brand"></i>MP3 best quality</span>
@@ -131,6 +138,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>
