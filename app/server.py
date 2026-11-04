@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import threading
 import urllib.parse
 from http import HTTPStatus
@@ -46,10 +47,12 @@ def _akhiran(path: str) -> str:
 
 
 class Ctx:
-    """State bersama yang diisi run.py: JobManager + referensi server."""
+    """State bersama yang diisi run.py: folder tujuan + JobManager + config."""
 
-    def __init__(self, jobs):
+    def __init__(self, folder: str, jobs, simpan_folder=None):
+        self.folder = folder          # folder tujuan hasil unduhan (pilihan user)
         self.jobs = jobs
+        self.simpan_folder = simpan_folder or (lambda _f: None)
         self.server = None  # diisi run.py setelah bind
 
 
@@ -103,9 +106,19 @@ def build_handler(ctx: Ctx) -> type:
             parsed = urllib.parse.urlparse(self.path)
             url = parsed.path
             if url == "/api/state":
-                return self._json(200, ctx.jobs.state())
+                st = ctx.jobs.state()
+                st["folder"] = ctx.folder
+                return self._json(200, st)
+            if url == "/api/open-folder":
+                # buka folder tujuan di pengelola berkas (argv list, aman)
+                try:
+                    subprocess.Popen(["xdg-open", ctx.folder])
+                except OSError as e:
+                    return self._bad(f"cannot open folder: {e}", 500)
+                return self._json(200, {"ok": True, "folder": ctx.folder})
             if url == "/api/fetch":
-                # kirim hasil convert ke perangkat peminat (lalu job buang folder)
+                # kirim SALINAN hasil convert ke perangkat peminat — file di
+                # folder tujuan TIDAK dihapus (itu milik user, bukan antrean)
                 raw = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
                 try:
                     jid = int(raw)
@@ -144,7 +157,8 @@ def build_handler(ctx: Ctx) -> type:
                         # koneksi putus di tengah: TAHAN file-nya supaya client
                         # boleh coba lagi (pembersihan tetap otomatis, lihat jobs)
                         return
-                # terkirim penuh → server tidak menyimpan hasil convert
+                # terkirim penuh → bersihkan sisa folder kerja (bila masih ada);
+                # file tersimpan di folder tujuan tetap utuh
                 ctx.jobs.selesai_fetch(jid)
                 return
             if url.startswith("/api/"):
@@ -178,6 +192,19 @@ def build_handler(ctx: Ctx) -> type:
             if url == "/api/cancel":
                 mungkin = ctx.jobs.cancel()
                 return self._json(200, {"ok": True, "batal": mungkin})
+
+            if url == "/api/folder":
+                f = str(data.get("folder", "")).strip()
+                if not f:
+                    return self._bad("folder cannot be empty")
+                if not os.path.isabs(f):
+                    return self._bad("folder must be an absolute path")
+                if not os.path.isdir(f):
+                    return self._bad("folder does not exist")
+                ctx.folder = f
+                ctx.jobs.set_folder(f)  # worker membaca folder dari SINI
+                ctx.simpan_folder(f)    # pilihan terakhir → config
+                return self._json(200, {"ok": True, "folder": f})
 
             if url == "/api/shutdown":
                 return self._shutdown()

@@ -3,12 +3,15 @@
 
     python3 run.py                     # port 8637 (+fallback), buka browser
     python3 run.py --no-browser        # untuk uji tanpa pop-up browser
-    python3 run.py --port 0 --print-port
+    python3 run.py --folder /tmp/x --port 0 --print-port
     python3 run.py --host 0.0.0.0 --no-browser   # dengar di LAN juga (TANPA auth)
 
-Server = converter murni (2026-11-03): TANPA folder tujuan / config — hasil
-convert tinggal sebentar di folder kerja (env RAVAAMD_WORK), dikirim ke
-perangkat peminat lewat /api/fetch, lalu dihapus. Tidak ada fitur pustaka.
+Folder tujuan hasil unduhan (fitur pilihan tempat simpan, dikembalikan
+2026-11-04): default ~/Music/My Musics, bisa diganti lewat GUI (/api/folder)
+atau flag --folder; pilihan terakhir disimpan ~/.config/ravaamd/config.json.
+Selesai convert → file dipindah ke folder tujuan (nama bentrok diberi suffix
+" (2)"), lalu opsi /api/fetch mengirim salinan ke browser tanpa menghapus
+file tersimpan.
 
 Port: default bind 127.0.0.1 saja; --host0.0.0.0 hanya atas permintaan
 eksplisit user (akses LAN rumah; lihat AGENTS.md §5). Bila sibuk, coba
@@ -17,6 +20,7 @@ eksplisit user (akses LAN rumah; lihat AGENTS.md §5). Bila sibuk, coba
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import sys
@@ -32,6 +36,34 @@ from app.jobs import JobManager          # noqa: E402
 from app.server import Ctx, build_handler  # noqa: E402
 
 DEFAULT_PORT = 8637
+DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Music", "My Musics")
+# RAVAAMD_CONFIG_DIR = override lokasi config (dipakai tests/ supaya pilihan
+# folder tes tidak menimpa config asli user) — lihat AGENTS.md §2.
+CFG_DIR = (os.environ.get("RAVAAMD_CONFIG_DIR")
+           or os.path.join(os.path.expanduser("~"), ".config", "ravaamd"))
+CFG_PATH = os.path.join(CFG_DIR, "config.json")
+
+
+def muat_folder() -> str:
+    """Folder tujuan terakhir yang dipilih user; fallback = pustaka musik."""
+    try:
+        with open(CFG_PATH) as f:
+            folder = json.load(f).get("folder")
+        if folder and os.path.isdir(folder):
+            return folder
+    except (OSError, ValueError):
+        pass
+    return DEFAULT_FOLDER
+
+
+def simpan_folder(folder: str) -> None:
+    """Persist pilihan folder tujuan; gagal tulis config bukan alasan gagal."""
+    try:
+        os.makedirs(CFG_DIR, exist_ok=True)
+        with open(CFG_PATH, "w") as f:
+            json.dump({"folder": folder}, f)
+    except OSError:
+        pass
 
 
 def ambil_port(basis: int, host: str = "127.0.0.1") -> int:
@@ -71,9 +103,14 @@ def main() -> None:
                     help="bind address; 0.0.0.0 = izinkan akses LAN (TANPA auth)")
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--print-port", action="store_true")
+    ap.add_argument("--folder", default=None,
+                    help="folder tujuan hasil unduhan (default: pilihan terakhir "
+                         "di config, atau ~/Music/My Musics)")
     args = ap.parse_args()
 
-    ctx = Ctx(jobs=JobManager())
+    folder = args.folder or muat_folder()
+    ctx = Ctx(folder=folder, jobs=JobManager(folder=folder),
+              simpan_folder=simpan_folder)
 
     port = ambil_port(args.port, args.host)
     handler = build_handler(ctx)

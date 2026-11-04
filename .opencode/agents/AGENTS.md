@@ -55,13 +55,19 @@
 
 ```
 run.py                 Pintu masuk. argparse (--port 8637,
-                       --host, --no-browser, --print-port), ThreadingHTTPServer
+                       --host, --no-browser, --print-port, --folder),
+                       ThreadingHTTPServer
                        di --host (DEFAULT 127.0.0.1;0.0.0.0 = akses LAN HANYA
                        atas permintaan user, lihat §5; banner tampilkan IP LAN
                        lewat _ip_lan()) + buka browser (webbrowser SETELAH
-                       bind sukses, timer 0.4s). Converter murni: tanpa folder
-                       config, hasil kerja di env RAVAAMD_WORK, dikirim ke
-                       perangkat via /api/fetch lalu dihapus.
+                       bind sukses, timer 0.4s). FOLDER TUJUAN hasil unduhan
+                       (dikembalikan 2026-11-04): default ~/Music/My Musics,
+                       pilihan terakhir disimpan config (CFG_DIR =
+                       env RAVAAMD_CONFIG_DIR atau ~/.config/ravaamd;
+                       config.json {"folder": ...}); muat_folder() cek isdir
+                       sebelum pakai. Hasil kerja tetap di env RAVAAMD_WORK
+                       (folder kerja per-job), dipindah ke folder tujuan saat
+                       job selesai.
 app/__init__.py        Menyimpan RESEP yt-dlp yang dikunci (dokumen inti).
 app/jobs.py            Job + JobManager. SATU worker thread (antrian FIFO,
                        urutan dijamin dijalankan sekaligus SEBELUM
@@ -112,33 +118,38 @@ install.sh             Pasangkan launcher ~/.local/bin/ravaamd + ikon
                        hicolor + entri ~/.local/share/applications/
                        ravaamd.desktop (tanpa sudo, AMAN dijalankan ulang).
 tests/api-test.py      unittest stdlib; menyalakan run.py dengan
-                       RAVAAMD_FAKE=1 di port bebas ACAK; 7 kasus (index,
-                       bentuk state, download kosong 400, fetch id invalid,
-                       siklus job fake + fetch, parse_progress,
+                       RAVAAMD_FAKE=1 + --folder & RAVAAMD_CONFIG_DIR
+                       terisolasi (tempfile) di port bebas ACAK; 11 kasus
+                       (index, bentuk state + folder, download kosong 400,
+                       fetch id invalid, siklus job fake + fetch, parse_progress,
+                       validasi format/quality, pilih folder (/api/folder),
                        bagi_judul/bersih_judul (import dari app.tags)).
 README.md              Ringkasan pemakaian untuk user (Bahasa Indonesia).
-Dockerfile             Image container (python:3.14-slim + ffmpeg + node +
-                       yt-dlp zipapp + config `--js-runtimes node` dibakar);
-                       build gate: `RUN python3 tests/api-test.py` (image
-                       layak = tes hijau); healthcheck scan port 8637..8657.
-compose.yaml           docker compose: `network_mode: host` + `command:
-                       --host0.0.0.0` (TERBUKTI — port-publish biasa TIDAK
-                       sampai bila app loopback, lihat §8): akses LAN →
-                       http://IP-server:8637, tunnel →127.0.0.1:8637.
-                       Volume `${MUSIC_DIR}:/music:Z`, MUSIC_DIR wajib.
 ```
 
 Arah pakai: user membuka sesi agent di folder ini; `RavaaMD` (GUI) dan
-`ytmp3` (CLI) adalah DUA pintu yang berbeda: GUI tidak menyimpan file (converter murni → kirim ke perangkat); CLI (`~/.local/bin/ytmp3`) menulis ke folder musik. Keduanya terpisah.
-job GUI harus jalanan sebelum CLI lain memutar file supaya tidak berebut.
+`ytmp3` (CLI) adalah DUA pintu yang berbeda: GUI menyimpan hasil ke FOLDER
+TUJUAN pilihan user (default ~/Music/My Musics, ganti via /api/folder atau
+`--folder`); CLI (`~/.local/bin/ytmp3`) menulis ke folder musik via
+YTMP3_DIR. Keduanya terpisah — jangan campur mekanisme config-nya.
+job GUI harus jalan dulu sebelum CLI lain memutar file supaya tidak berebut.
 
 ## 4. Kontrak API internal (eksak — endpoint tidak boleh berisiko)
 
 * `GET /` + `/static/*` — file dari `static/`; guard traversal (ASCII path
   berawalan STATIC_DIR + os.sep). Mime dipecah dari AKHIRAN_STATIS.
-* `GET /api/state` -> `{current, queue, history}` — SATU sumber untuk
-  seluruh UI; `current` null saat nganggur. Tidak ada folder/pustaka
-  (server = converter murni).
+* `GET /api/state` -> `{current, queue, history, folder}` — SATU sumber untuk
+  seluruh UI; `current` null saat nganggur; `folder` = path ABSOLUT folder
+  tujuan hasil unduhan (pilihan user, diganti via POST /api/folder).
+* `POST /api/folder` `{folder}` -> `{ok, folder}` — 400 bila kosong, path
+  relatif, atau bukan folder yang ada. Mengubah ctx.folder + jobs.folder +
+  menyimpan config (simpan_folder). File lama TIDAK PERNAH tertimpa: nama
+  bentrok di folder tujuan diberi suffix " (2)", " (3)" …
+* `GET /api/open-folder` -> `{ok, folder}` — `xdg-open` argv-list ke folder
+  tujuan; 500 bila xdg-open tak ada.
+* `GET /api/fetch?id=N` — kirim SALINAN hasil convert ke browser; file di
+  folder tujuan TIDAK dihapus (milik user). Hanya folder kerja sisa (fallback
+  bila pemindahan gagal) yang dibuang setelah transfer penuh.
 * `POST /api/download` `{query}` -> 201 `{ok, job}` — 400 bila kosong atau
   > 300 char. Non-URL dicari di YouTube Music dulu (cari_ytm di app/ytm.py,
   prefer trek ATV resmi) lalu fallback `ytsearch1:` — rantai di jobs.py
@@ -168,7 +179,8 @@ job GUI harus jalanan sebelum CLI lain memutar file supaya tidak berebut.
   `--host0.0.0.0` yang SUDAH DISETUJUI user (2026-11-03: home server —
   LAN via IP untuk akses cepat, internet lewat tunnel Cloudflare) —
   TANPA auth; risiko "siapa pun di LAN bisa lihat/hapus" diterima user
-  untuk LAN rumah. compose.yaml memakai flag itu + `network_mode: host`.
+  untuk LAN rumah. Docker/compose DICABUT (2026-11-04) — app hanya
+  berjalan native, flag itu dipakai langsung di `python3 run.py --host 0.0.0.0`.
   Kalau user minta auth atau skenario exposure lain, diskusi dulu.
 * DILARANG memanggil shell lewat string (`sh -c`, f-string command):
   semua subprocess = argv list; query/lagu apa pun aman.
@@ -193,18 +205,15 @@ job GUI harus jalanan sebelum CLI lain memutar file supaya tidak berebut.
 ## 6. Perintah (eksak)
 
 ```bash
-cd ~/Projects/ytmp3-gui
+cd ~/Projects/RavaaMD
 python3 run.py                     # GUI -> http://127.0.0.1:8637 (fallback +1..+20), browser otomatis
 python3 run.py --no-browser        # untuk pengujian (tests/ dan curl)
-python3 run.py --folder /tmp/opencode/gui-test --no-browser --print-port
+python3 run.py --no-browser --print-port
 python3 run.py --host 0.0.0.0 --no-browser   # dengar di LAN juga (tanpa auth, §5)
+python3 run.py --folder /tmp/opencode/gui-test --no-browser --print-port   # paksa folder tujuan hasil unduhan
 python3 tests/api-test.py          # unittest, env RAVAAMD_FAKE=1 otomatis, tanpa jaringan
 bash install.sh                    # pasang launcher + .desktop + ikon (idempoten)
 ~/.local/bin/ravaamd             # launcher GUI (setelah install.sh)
-# deploy container (dokumentasi lengkap di README bagian Docker):
-MUSIC_DIR="$HOME/Music/My Musics" docker compose up -d --build   # app :8637
-docker compose down                # hentikan container
-docker build -t ravaamd .        # build saja (gate: suite tes jalan di dalam)
 # upgrade downloader bila unduhan mendadak gagal semua:
 yt-dlp -U
 # git (repo publik, init 2026-11-03): remote git@github.com:kholif18/RavaaMD.git
@@ -213,6 +222,11 @@ git push                        # branch main; commit dulu dengan pesan jelas
 
 Port: 8637 default (fallback +1 s/d +20). DILARANG pindah default tanpa
 update run.py + AGENTS ini + README.
+
+ENV: RAVAAMD_WORK = folder kerja per-job; RAVAAMD_FAKE = mode tes;
+RAVAAMD_YTDLP = path yt-dlp; RAVAAMD_CONFIG_DIR = lokasi config folder
+tujuan (default ~/.config/ravaamd — dipakai tests/ supaya config user
+tidak tertimpa).
 
 ## 7. Definition of Done (fitur dianggap selesai bila)
 
@@ -225,6 +239,11 @@ update run.py + AGENTS ini + README.
 5. Tidak ada port/ENV baru tanpa didokumentasikan di §2/§6.
 
 ## 8. Masalah yang pernah & sudah beres (jangan ulangi)
+
+> **DICABUT 2026-11-04:** Docker/compose dihapus atas permintaan user —
+> RavaaMD kembali berjalan NATIVE di laptop/PC (desain awal). Entri di bawah
+> yang menyinggung container/compose adalah catatan HISTORIS; jangan
+> menghidupkannya kembali kecuali user minta.
 
 * `--no-progress` bersama `--newline` MEMATIKAN bar progres GUI → sudah
   dihapus, jangan dikembalikan.

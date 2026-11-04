@@ -25,12 +25,11 @@ and thumbnail.
 **From terminal**:
 
 ```bash
-python3 ~/Projects/ytmp3-gui/run.py
+python3 ~/Projects/RavaaMD/run.py
 ```
 
 then open `http://127.0.0.1:8637` in your default browser. To also listen on
-LAN (from laptop/phone via IP, no auth):
-`python3 run.py --host0.0.0.0` — see Deploy section.
+LAN (from laptop/phone via IP, no auth): `python3 run.py --host 0.0.0.0`.
 
 In the GUI:
 
@@ -41,14 +40,20 @@ In the GUI:
    first** for MP4 (video), falling back to the other if not found.
 2. Progress bar + log show download progress; multiple downloads queue one at a
    time (MP3 and MP4 share the same queue).
-3. **Choose quality before downloading:**
-   * MP4 resolution: Best / 1080p / 720p / 480p / 360p (like y2mate)
-   * MP3 bitrate: Best / 320k / 256k / 192k / 128k
-4. **Tags are split automatically** after download: title goes to *title*,
+3. **Quality:** MP3 always downloads **best quality** (locked recipe — no
+   bitrate list needed). For MP4, pick a resolution:
+   * MP4 resolution: 720p (default) / 1080p / 480p / 360p / Best
+4. **Choose the save folder:** finished downloads are saved automatically to
+   the folder shown below the search box (default `~/Music/My Musics`).
+   Type any existing absolute path and click **Save** — the choice is
+   remembered for next time. **Open** opens that folder in your file
+   manager. Existing files are **never overwritten**: a name conflict gets
+   ` (2)`, ` (3)`, … suffix.
+5. **Tags are split automatically** after download: title goes to *title*,
    artist to *artist* (e.g. `Sugar` / `Maroon 5`) — so Amberol shows tracks
    neatly, not one clump like "Artist - Title (...)". Applies to both MP3
    and MP4.
-5. Done? Click **Quit** to shut down the application properly.
+6. Done? Click **Quit** to shut down the application properly.
 
 ## Requirements
 
@@ -60,37 +65,27 @@ In the GUI:
 
 If downloads suddenly all fail: `yt-dlp -U`.
 
-## Deploy on home server (Docker)
+## Run on laptop / PC (native)
 
-Image includes everything needed (python + ffmpeg + node + yt-dlp +
-`--js-runtimes node` config pre-baked) — on the server, just need Docker:
+The app runs natively — no Docker, no server needed:
 
 ```bash
-cd ~/Projects/RavaaMD
-docker compose up -d --build
-# → app at http://127.0.0.1:8637  (build automatically runs test suite)
-docker compose down            # stop
+python3 ~/Projects/RavaaMD/run.py
+# → browser opens http://127.0.0.1:8637 automatically
 ```
 
-Important notes (tested e2e — real downloads via container over loopback AND
-LAN IP):
-
-- Compose uses `network_mode: host` + `--host 0.0.0.0`. Without both, regular
-  Docker port-publish (`"8637:8637"`) **will not work** because the app only
-  listens on loopback inside the container — this pattern is tested, do not
-  change to regular port-publish.
-- **Close the native GUI first** before `compose up` so the container gets
-  port 8637 (if busy, app auto-falls back to 8638..8657 — tunnel would point
-  to the wrong port).
-- Server = pure converter: no music volume / `MUSIC_DIR`. Convert results stay
-  in `RAVAAMD_WORK` (default `/tmp/ravaamd-work` in container) briefly, then
-  are sent to the device via `/api/fetch` and deleted.
+Finished files are saved to your **save folder** (default
+`~/Music/My Musics`, change it in the GUI) — the temporary work folder is
+cleaned automatically. The **Download** button next to a finished job pulls
+an extra browser copy (e.g. for a phone over LAN); the saved file is never
+deleted. See `AGENTS.md` for LAN mode (`--host 0.0.0.0`).
 ### Cara kerja
 
 Browser di laptop/HP hanya **remote control**: ketik lagu, klik Unduh —
-server yang **convert** (yt-dlp + ffmpeg), lalu MP3 langsung **terunduh ke
-perangkatmu** seperti y2mate, dan dihapus dari server. Tak ada simpanan
-disini, tak perlu pembersihan manual.
+aplikasi **convert** (yt-dlp + ffmpeg), lalu hasilnya **tersimpan otomatis
+ke folder pilihanmu** (default `~/Music/My Musics`) lengkap dengan tag +
+cover, seperti y2mate. Folder kerja sisa dibuang otomatis — tak perlu
+pembersihan manual.
 
 ### Dua jalur akses
 
@@ -99,7 +94,7 @@ disini, tak perlu pembersihan manual.
 | Di rumah (LAN) | `http://IP-SERVER:8637` (contoh: `http://192.168.100.4:8637`) | cepat, langsung, tanpa Cloudflare |
 | Di luar rumah | `https://nama-domain-kamu` (tunnel dari dashboard Cloudflare) | **wajib** Access policy (email OTP) |
 
-- IP server lihat di banner log container, atau `ip -4 addr show scope global`.
+- IP server lihat di banner log, atau `ip -4 addr show scope global`.
 - Fedora/firewalld: cek port terbuka dengan `firewall-cmd --list-ports`;
   bila 8637 tidak ada di daftar, buka dulu:
   `sudo firewall-cmd --permanent --add-port=8637/tcp && sudo firewall-cmd --reload`

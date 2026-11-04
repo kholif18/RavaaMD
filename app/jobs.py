@@ -1,10 +1,12 @@
 """Antrian unduhan — eksekusi yt-dlp SATU job sekaligus (urutan memakai lock).
 
-Server = CONVERTER MURNI (keputusan user 2026-11-03): hasil convert tinggal di
-folder kerja per-job, dikirim ke perangkat peminat lewat `GET /api/fetch`,
-lalu DIHAPUS — tidak ada hasil yang disimpan di server (tak ada pembersihan
-manual). Folder kerja dibuang juga saat: start (sisa crash), job gagal/batal,
-dan job keluar dari history (overflow).
+Hasil convert dikerjakan di folder kerja per-job (env RAVAAMD_WORK), lalu
+DIPINDAH ke folder tujuan pilihan user (fitur pilihan tempat simpan —
+default ~/Music/My Musics, diganti via /api/folder) saat job selesai —
+nama bentrok diberi suffix " (2)" supaya file lama tak tertimpa. /api/fetch
+mengirim SALINAN ke browser tanpa menghapus file tersimpan. Folder kerja
+dibuang juga saat: start (sisa crash), job gagal/batal, dan job keluar dari
+history (overflow).
 
 Invarian yang dijaga (lihat AGENTS.md §5):
   * HANYA satu process yt-dlp jalan bersamaan; job berikutnya menunggu.
@@ -133,11 +135,14 @@ class JobManager:
     """Worker thread tunggal; antrian FIFO; cancel mematikan proses jalan.
 
     Folder kerja: env RAVAAMD_WORK (default $TMPDIR/ravaamd). Start membuang
-    sisa >1 jam (aman untuk instance kedua yang masih jalan); hasil job menunggu
-    di folder masing-masing sampai di-fetch, gagal, atau keluar history.
+    sisa >1 jam (aman untuk instance kedua yang masih jalan). Job selesai →
+    hasil DIPINDAH ke folder tujuan (`self.folder`, diganti /api/folder);
+    folder kerja langsung dibuang. Bila pemindahan gagal, file tetap di
+    folder kerja dan dijaga untuk fetch (dibuang otomatis oleh purge/fetch).
     """
 
-    def __init__(self, on_state_change=None):
+    def __init__(self, folder: str = "", on_state_change=None):
+        self.folder = folder          # folder tujuan — di-update /api/folder
         self.base = (os.environ.get("RAVAAMD_WORK")
                      or os.path.join(tempfile.gettempdir(), "ravaamd"))
         os.makedirs(self.base, exist_ok=True)
@@ -169,7 +174,12 @@ class JobManager:
             except OSError:
                 pass
 
-    # ---- fetch: hasil convert dikirim ke perangkat lalu dihapus ----
+    # ---- fetch: SALINAN hasil convert dikirim ke perangkat ----
+    def set_folder(self, folder: str) -> None:
+        """Ganti folder tujuan hasil unduhan (dipanggil handler /api/folder)."""
+        with self.lock:
+            self.folder = folder
+
     def ambil(self, jid: int) -> str | None:
         """Path absolut mp3 job done yang MENUNGGU dikirim; None bila tak ada."""
         with self.lock:
@@ -180,10 +190,12 @@ class JobManager:
         return None
 
     def selesai_fetch(self, jid: int) -> None:
-        """Panggil SETELAH file terkirim penuh ke perangkat — buang foldernya.
+        """Panggil SETELAH salinan terkirim penuh ke perangkat.
 
-        Bila koneksi putus di tengah, pemanggil MENAHAN ini supaya file masih
-        ada untuk percobaan ulang (otomatis dibuang oleh purge berikutnya)."""
+        File di folder tujuan TIDAK disentuh (milik user). Yang dibuang hanya
+        folder kerja sisa — hanya ada bila pemindahan ke folder tujuan gagal
+        (fallback lama). Bila koneksi putus di tengah, pemanggil MENAHAN ini
+        supaya file masih ada untuk percobaan ulang."""
         with self.lock:
             d = self._dirs.pop(jid, None)
         if d:
@@ -552,6 +564,38 @@ class JobManager:
                 f.write(b"ID3\x03\x00\x00\x00" + b"\x00" * 64)
         job.file = out
 
+    def _pindah_hasil(self, job: Job) -> bool:
+        """Pindahkan hasil convert ke folder tujuan pilihan user (True = sukses).
+
+        Nama sudah ada di tujuan → tambah " (2)", " (3)" … — file lama user
+        (mis. pustaka di ~/Music/My Musics) TIDAK PERNAH tertimpa.
+        """
+        tujuan = self.folder
+        src = job.file
+        if not tujuan or not src:
+            return False
+        try:
+            os.makedirs(tujuan, exist_ok=True)
+            nama = os.path.basename(src)
+            dst = os.path.join(tujuan, nama)
+            if os.path.exists(dst):
+                dasar, ekst = os.path.splitext(nama)
+                n = 2
+                while os.path.exists(
+                        os.path.join(tujuan, f"{dasar} ({n}){ekst}")):
+                    n += 1
+                dst = os.path.join(tujuan, f"{dasar} ({n}){ekst}")
+            shutil.move(src, dst)  # lintas partisi aman (copy + hapus sumber)
+        except OSError as e:
+            job.lines.append(f"save to folder failed: {e}")
+            return False
+        job.file = dst
+        job.lines.append(f"saved to {tujuan}")
+        if job.dir:
+            shutil.rmtree(job.dir, ignore_errors=True)
+            job.dir = None
+        return True
+
     def _finish(self, job: Job, error: bool = False):
         job.ended = time.time()
         with self.lock:
@@ -563,10 +607,12 @@ class JobManager:
             self.current = None
             self.proc = None
             if job.status == "done" and job.file:
-                # menunggu dikirim ke perangkat; foldernya dijaga sampai fetch
-                self._dirs[job.id] = job.dir
+                if not self._pindah_hasil(job) and job.dir:
+                    # pemindahan gagal / tanpa folder tujuan: file masih di
+                    # folder kerja — dijaga untuk fetch, dibuang nanti
+                    self._dirs[job.id] = job.dir
             elif job.dir:
-                # gagal/batal: hasil (parsial) langsung dibuang — server tak menyimpan
+                # gagal/batal: hasil (parsial) langsung dibuang
                 shutil.rmtree(job.dir, ignore_errors=True)
             # job yang terdorong keluar history (overflow) → foldernya ikut dibuang
             live = ({j.id for j in self.history} | {j.id for j in self.queue}

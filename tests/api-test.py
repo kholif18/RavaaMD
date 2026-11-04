@@ -73,12 +73,16 @@ class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.kerja = tempfile.mkdtemp(prefix="ravaamd-kerja-")  # folder kerja terisolasi
-        env = {**os.environ, "RAVAAMD_FAKE": "1", "RAVAAMD_WORK": cls.kerja}
+        cls.tujuan = tempfile.mkdtemp(prefix="ravaamd-tujuan-")  # folder tujuan unduhan
+        cls.cfg = tempfile.mkdtemp(prefix="ravaamd-cfg-")  # config isolasi (jangan timpa config user)
+        env = {**os.environ, "RAVAAMD_FAKE": "1", "RAVAAMD_WORK": cls.kerja,
+               "RAVAAMD_CONFIG_DIR": cls.cfg}
         for attempt in range(3):
             cls.port = _bebas_port()
             cls.proc = subprocess.Popen(
                 [sys.executable, os.path.join(ROOT, "run.py"),
-                 "--port", str(cls.port), "--no-browser"],
+                 "--port", str(cls.port), "--no-browser",
+                 "--folder", cls.tujuan],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
             for _ in range(50):
@@ -98,6 +102,8 @@ class TestApi(unittest.TestCase):
         cls.proc.terminate()
         cls.proc.wait(timeout=5)
         shutil.rmtree(cls.kerja, ignore_errors=True)
+        shutil.rmtree(cls.tujuan, ignore_errors=True)
+        shutil.rmtree(cls.cfg, ignore_errors=True)
 
     def test_01_index_html(self):
         status, html, _ = self._html()
@@ -111,10 +117,11 @@ class TestApi(unittest.TestCase):
     def test_02_state_bentuk(self):
         status, st = _get(self.port, "/api/state")
         self.assertEqual(status, 200)
-        for kunci in ("current", "queue", "history"):
+        for kunci in ("current", "queue", "history", "folder"):
             self.assertIn(kunci, st)
-        # server converter murni: TANPA folder & pustaka
-        self.assertNotIn("folder", st)
+        # folder tujuan = pilihan via --folder (fitur pilihan tempat simpan)
+        self.assertEqual(st["folder"], self.tujuan)
+        # tidak ada fitur pustaka
         self.assertNotIn("library", st)
         self.assertEqual(st["current"], None)
         self.assertEqual(st["queue"], [])
@@ -220,13 +227,17 @@ class TestApi(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, FAKE_BYTES_MP3, "isi yang diterima = isi asli file")
         self.assertIn("attachment", hdr.get("Content-Disposition", ""))
-        # server tidak menyimpan: setelah terkirim, folder kerja job dibuang
+        # hasil PINDAH ke folder tujuan; folder kerja kosong
         time.sleep(0.2)
         self.assertEqual(os.listdir(self.kerja), [],
                          "folder kerja harus kosong setelah fetch")
-        # fetch ulang = 404 (sudah terkirim & dihapus)
-        status, _, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
-        self.assertEqual(status, 404)
+        simpan = os.path.join(self.tujuan, terakhir["file"])
+        self.assertTrue(os.path.isfile(simpan),
+                        "file harus tersimpan di folder tujuan")
+        # fetch ulang = masih 200 (SALINAN — file user tidak dihapus server)
+        status, body2, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
+        self.assertEqual(status, 200)
+        self.assertEqual(body2, FAKE_BYTES_MP3)
 
     def test_05b_siklus_job_fake_mp4_lalu_fetch(self):
         status, r = _post(self.port, "/api/download", {"query": "uji video", "format": "mp4"})
@@ -254,8 +265,11 @@ class TestApi(unittest.TestCase):
         time.sleep(0.2)
         self.assertEqual(os.listdir(self.kerja), [],
                          "folder kerja harus kosong setelah fetch")
+        self.assertTrue(os.path.isfile(os.path.join(self.tujuan, terakhir["file"])),
+                        "file mp4 harus tersimpan di folder tujuan")
+        # fetch ulang = masih 200 (salinan — file user tidak dihapus)
         status, _, _ = _get_bin(self.port, f"/api/fetch?id={jid}")
-        self.assertEqual(status, 404)
+        self.assertEqual(status, 200)
 
     def test_06_parse_progress(self):
         self.assertEqual(parse_progress("[download]  42.5% of    4.00MiB at  2.11MiB/s ETA 00:01"), 42.5)
@@ -283,6 +297,38 @@ class TestApi(unittest.TestCase):
                          "Somewhere Only We Know")
 
 
+
+
+    def test_08_folder_pilih(self):
+        # path relatif ditolak
+        status, r = _post(self.port, "/api/folder", {"folder": "masih/relatif"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", r)
+        # folder yang tidak ada ditolak
+        status, r = _post(self.port, "/api/folder",
+                          {"folder": "/tmp/ravaamd-tidak-ada-xyz"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", r)
+        # folder valid diterima & langsung terbaca di state
+        tujuan2 = tempfile.mkdtemp(prefix="ravaamd-tujuan2-")
+        try:
+            status, r = _post(self.port, "/api/folder", {"folder": tujuan2})
+            self.assertEqual(status, 200)
+            self.assertEqual(r["folder"], tujuan2)
+            _, st = _get(self.port, "/api/state")
+            self.assertEqual(st["folder"], tujuan2)
+            # unduhan berikutnya masuk ke folder baru
+            status, r = _post(self.port, "/api/download", {"query": "uji lagu"})
+            self.assertEqual(status, 201)
+            jid = r["job"]["id"]
+            job = self._tunggu_selesai(jid)
+            self.assertIsNotNone(job, "job tidak selesai")
+            self.assertEqual(job["status"], "done")
+            self.assertTrue(os.path.isfile(os.path.join(tujuan2, job["file"])),
+                            "file harus tersimpan di folder tujuan baru")
+        finally:
+            _post(self.port, "/api/folder", {"folder": self.tujuan})  # kembalikan
+            shutil.rmtree(tujuan2, ignore_errors=True)
 
 
 if __name__ == "__main__":

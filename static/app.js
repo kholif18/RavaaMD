@@ -51,10 +51,7 @@ function liJob(job) {
 let state = null;
 let tombolJalan = false;
 let formatTerpilih = "mp3";
-let kualitasTerpilih = "best";
-let querySedang = "";
 
-/* ---- render ---- */
 function render() {
   if (!state) return;
   const cur = state.current, queue = state.queue || [], hist = state.history || [];
@@ -91,6 +88,11 @@ function render() {
 
   $("sejarah-wrap").hidden = !hist.length;
   $("sejarah").innerHTML = [...hist].reverse().map(liJob).join("");
+
+  // folder tujuan — jangan timpa input saat user sedang mengetik
+  if (document.activeElement !== $("folder-input")) {
+    $("folder-input").value = state.folder || "";
+  }
 }
 
 /* ---- toast ---- */
@@ -139,70 +141,41 @@ function layarMati() {
     </div>`;
 }
 
-/* ---- tab switching MP3/MP4 ---- */
-function pilihTab(fmt) {
-  formatTerpilih = fmt;
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("aktif"));
-  document.querySelector(`.tab-btn[data-fmt="${fmt}"]`).classList.add("aktif");
-  document.querySelectorAll(".qual-panel").forEach(p => p.classList.remove("aktif"));
-  document.querySelector(`#qual-${fmt}`).classList.add("aktif");
-}
-
-/* ---- event listeners ---- */
 window.addEventListener("DOMContentLoaded", () => {
-  // Start button: validate input, show format options
-  $("btn-start").addEventListener("click", () => {
-    const q = $("q").value.trim();
-    if (!q) { $("q").focus(); return; }
-    querySedang = q;
-    $("format-options").hidden = false;
-    $("info-box").hidden = true;
-    pilihTab("mp3");
+  $("form-unduh").addEventListener("submit", (e) => { e.preventDefault(); unduh(); });
+  // format toggle MP3/MP4 — resolution select only shows for MP4
+  $("form-unduh").addEventListener("click", (e) => {
+    if (e.target.matches(".fmt-btn")) {
+      document.querySelectorAll(".fmt-btn").forEach(b => b.classList.remove("aktif"));
+      e.target.classList.add("aktif");
+      formatTerpilih = e.target.dataset.fmt;
+      $("kualitas-wrap").hidden = formatTerpilih !== "mp4";
+    }
   });
+  $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
 
-  // Tab MP3/MP4
-  document.querySelectorAll(".tab-btn").forEach(b => {
-    b.addEventListener("click", () => pilihTab(b.dataset.fmt));
+  // folder tujuan hasil unduhan
+  $("btn-folder").addEventListener("click", async () => {
+    const f = $("folder-input").value.trim();
+    const r = await api("/api/folder", { folder: f });
+    if (r.error) toast(r.error, "error");
+    else {
+      toast("Save folder updated", "sukses");
+      $("folder-input").value = r.folder;
+    }
   });
-
-  // Download per quality
-  document.querySelectorAll(".qual-dl").forEach(b => {
-    b.addEventListener("click", () => unduh(b.dataset.fmt, b.dataset.qual));
+  $("btn-open").addEventListener("click", async () => {
+    const r = await api("/api/open-folder");
+    if (r.error) toast(r.error, "error");  // xdg-open tak ada → pesan jelas
   });
-
-  // Manual download for completed jobs (event delegation — innerHTML is replaced each poll)
+  // manual download for completed jobs (delegation — innerHTML replaced each poll)
   $("sejarah").addEventListener("click", (e) => {
     const btn = e.target.closest(".dl-btn");
-    if (btn) unduhSekarang(Number(btn.dataset.id));
+    if (btn) tarikHasil({ id: Number(btn.dataset.id), file: "" });
   });
   $("queue").addEventListener("click", (e) => {
     const btn = e.target.closest(".dl-btn");
-    if (btn) unduhSekarang(Number(btn.dataset.id));
-  });
-
-  // Close info box
-  $("btn-info-close").addEventListener("click", () => {
-    $("info-box").hidden = true;
-  });
-
-  $("btn-cancel").addEventListener("click", () => api("/api/cancel", {}));
-
-  // download modal buttons
-  $("dmodal-download").addEventListener("click", () => {
-    if (djobId == null) return;
-    // user gesture → browser mengizinkan unduhan via navigasi
-    window.location.href = "/api/fetch?id=" + djobId;
-    sudah.add(djobId);
-    simpanSet(K_SUDAH, sudah);
-    $("dmodal-download").hidden = true;
-    $("dmodal-pesan").textContent = "Download started — check your Downloads folder.";
-  });
-  $("dmodal-cancel").addEventListener("click", async () => {
-    await api("/api/cancel", {});
-  });
-  $("dmodal-close").addEventListener("click", () => {
-    $("dmodal").hidden = true;
-    djobId = null;
+    if (btn) tarikHasil({ id: Number(btn.dataset.id), file: "" });
   });
   $("btn-exit").addEventListener("click", async () => {
     const ok = await konfirmasi({
@@ -214,7 +187,6 @@ window.addEventListener("DOMContentLoaded", () => {
     await api("/api/shutdown", {});
     layarMati();
   });
-
   poll();
   window.setInterval(poll, 800);
 });
@@ -224,24 +196,17 @@ async function poll() {
   if (r.error) return;
   state = r;
   render();
-  pollModal();
 }
 
-/* ---- fetch result ---- */
-const K_MINTA = "ytmp3-minta", K_SUDAH = "ytmp3-sudah";
-function muatSet(k) {
-  try { return new Set(JSON.parse(sessionStorage.getItem(k) || "[]")); } catch { return new Set(); }
-}
-function simpanSet(k, s) {
-  try { sessionStorage.setItem(k, JSON.stringify([...s].slice(-30))); } catch { /* private mode: OK */ }
-}
-const minta = muatSet(K_MINTA);
-const sudah = muatSet(K_SUDAH);
-const sedang = new Set();
-const coba = {};
+/* ---- manual browser copy (tombol Download per job) ----
+   Hasil OTOMATIS tersimpan ke folder tujuan pilihan user (fitur save folder)
+   — fetch di sini hanya mengambil SALINAN ke browser (mis. dari HP via LAN);
+   file tersimpan TIDAK pernah dihapus server. */
+const sedang = new Set();  // id job sedang di-fetch (cegah klik dobel)
 
 async function tarikHasil(job) {
   const id = job.id;
+  if (sedang.has(id)) return;
   sedang.add(id);
   try {
     const res = await fetch("/api/fetch?id=" + id);
@@ -250,131 +215,41 @@ async function tarikHasil(job) {
       throw new Error(e.error || "HTTP " + res.status);
     }
     const blob = await res.blob();
+    // cari nama file asli dari state (untuk a.download)
+    let nama = job.file;
+    if (state) {
+      const j = [...(state.history || []), ...(state.queue || []), state.current]
+        .find(x => x && x.id === id);
+      if (j && j.file) nama = j.file;
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = job.file;
+    a.download = nama || "ravaamd-download";
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
-    sudah.add(id);
-    simpanSet(K_SUDAH, sudah);
-    toast(`"${job.file}" saved to Downloads folder`, "sukses");
+    toast(`"${nama}" downloaded`, "sukses");
   } catch (e) {
-    coba[id] = (coba[id] || 0) + 1;
-    if (coba[id] >= 3) {
-      sudah.add(id);
-      simpanSet(K_SUDAH, sudah);
-      toast(`Failed to fetch "${job.file}": ${e.message}`, "error");
-    }
+    toast(`Failed to fetch job #${id}: ${e.message}`, "error");
   } finally {
     sedang.delete(id);
   }
 }
 
-function tarikSelesai() {
-  // Auto-download from setInterval is blocked by browsers (not a user gesture).
-  // Users click the manual Download button next to completed jobs instead.
-  // Kept as no-op; download happens via unduhSekarang() on button click.
-}
-
-/* ---- manual download for completed job (user gesture → allowed) ---- */
-async function unduhSekarang(jid) {
-  if (!state) return;
-  const job = [...(state.history || []), ...(state.queue || []), state.current]
-    .find(j => j && j.id === jid);
-  if (!job || !job.file) return;
-  // window.location.href triggered by user gesture → browser allows download
-  window.location.href = "/api/fetch?id=" + jid;
-  sudah.add(jid);
-  simpanSet(K_SUDAH, sudah);
-  toast(`"${job.file}" downloading...`, "sukses");
-}
-
-/* ---- download: show info box then call API ---- */
-/* ---- download modal state ---- */
-let djobId = null;
-
-function bukaModal(job) {
-  djobId = job.id;
-  $("dmodal-query").textContent = job.query;
-  $("dmodal-pct").textContent = "0%";
-  $("dmodal-bar").style.width = "0%";
-  $("dmodal-bar").classList.remove("indeterminate");
-  $("dmodal-download").hidden = true;
-  $("dmodal-pesan").textContent = "";
-  $("dmodal-cancel").hidden = job.status !== "running";
-  setPilModal(job.status);
-  $("dmodal").hidden = false;
-}
-
-function setPilModal(status) {
-  const el = $("dmodal-status");
-  el.className = `pil ${status}`;
-  el.textContent = LABEL[status] || status;
-}
-
-function perbaruiModal(job) {
-  if (!job) return;
-  setPilModal(job.status);
-  if (job.status === "running") $("dmodal-cancel").hidden = false;
-  if (job.percent != null) {
-    $("dmodal-bar").classList.remove("indeterminate");
-    $("dmodal-bar").style.width = job.percent + "%";
-    $("dmodal-pct").textContent = Math.round(job.percent) + "%";
-  } else {
-    $("dmodal-bar").classList.add("indeterminate");
-  }
-  // tampilkan baris log terakhir supaya user melihat aktivitas (challenge,
-  // download, re-encode, cover) selama percent belum tersedia
-  const lines = job.lines || [];
-  const log = lines.slice(-3).join("\n");
-  const el = $("dmodal-log");
-  if (el.textContent !== log) {
-    el.textContent = log;
-    el.scrollTop = 1e9;
-  }
-  if (job.status === "done") {
-    $("dmodal-download").hidden = false;
-    $("dmodal-cancel").hidden = true;
-    $("dmodal-pesan").textContent = `Ready: ${job.file}`;
-  } else if (job.status === "error") {
-    $("dmodal-download").hidden = true;
-    $("dmodal-cancel").hidden = true;
-    $("dmodal-pesan").textContent = "Download failed — check the log panel.";
-  } else if (job.status === "canceled") {
-    $("dmodal-download").hidden = true;
-    $("dmodal-cancel").hidden = true;
-    $("dmodal-pesan").textContent = "Download canceled.";
-  }
-}
-
-function pollModal() {
-  if (djobId == null || !state) return;
-  const job = [...(state.history || []), ...(state.queue || []), state.current]
-    .find(j => j && j.id === djobId);
-  if (job) perbaruiModal(job);
-}
-
-async function unduh(fmt, qual) {
+async function unduh() {
   if (tombolJalan) return;
-  const q = querySedang.trim();
+  const q = $("q").value.trim();
   if (!q) { $("q").focus(); return; }
   tombolJalan = true;
-
-  // show info box
-  $("info-query").textContent = q;
-  $("info-box").hidden = false;
-
-  const r = await api("/api/download", { query: q, format: fmt, quality: qual });
+  render();
+  // MP3 → selalu kualitas terbaik (resep terkunci); MP4 → resolusi terpilih
+  const quality = formatTerpilih === "mp4" ? $("kualitas").value : "best";
+  const r = await api("/api/download", { query: q, format: formatTerpilih, quality });
   tombolJalan = false;
-  if (r.error) {
-    toast(r.error, "error");
-  } else {
+  if (r.error) toast(r.error, "error");
+  else {
     $("q").value = "";
-    minta.add(r.job.id);
-    simpanSet(K_MINTA, minta);
-    bukaModal(r.job);
     toast("Added to queue", "sukses");
   }
   render();
