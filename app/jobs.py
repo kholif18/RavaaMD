@@ -279,6 +279,7 @@ class JobManager:
                 break  # dibatalkan user — hentikan segera, jangan coba URL berikutnya
             if i > 0:
                 job.lines.append("retry via regular YouTube search…")
+            job.lines.append("fetching video info (JS challenge) — this can take a while…")
             sebelum = set(os.listdir(job.dir))
             code = self._jalankan_ytdlp(job, url, job.format, job.quality)
             if code == 0:

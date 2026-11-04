@@ -232,6 +232,14 @@ input[type="text"]:focus {
 .dmodal-dl { margin-top: 16px; }
 .dmodal-pesan { margin: 12px 0 14px; font-size: 12.5px; color: var(--redup);
   word-break: break-word; min-height: 18px; }
+.dmodal-log {
+  margin: 10px 0 0; max-height: 84px; overflow-y: auto; text-align: left;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--inset); border: 1px solid var(--line);
+  font: 10.5px/1.5 ui-monospace, "JetBrains Mono", monospace;
+  color: #96a0b8; white-space: pre-wrap; word-break: break-word;
+  scrollbar-width: thin;
+}
 
 .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
 .chip {

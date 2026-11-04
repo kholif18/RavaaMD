@@ -325,6 +325,15 @@ function perbaruiModal(job) {
   } else {
     $("dmodal-bar").classList.add("indeterminate");
   }
+  // tampilkan baris log terakhir supaya user melihat aktivitas (challenge,
+  // download, re-encode, cover) selama percent belum tersedia
+  const lines = job.lines || [];
+  const log = lines.slice(-3).join("\n");
+  const el = $("dmodal-log");
+  if (el.textContent !== log) {
+    el.textContent = log;
+    el.scrollTop = 1e9;
+  }
   if (job.status === "done") {
     $("dmodal-download").hidden = false;
     $("dmodal-cancel").hidden = true;
